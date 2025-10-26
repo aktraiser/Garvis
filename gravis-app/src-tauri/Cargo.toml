@@ -71,6 +71,40 @@ chrono = { version = "0.4", features = ["serde"] }
 num_cpus = "1.16"
 clap = { version = "4.4", features = ["derive"] }
 
+# === Phase 4 OCR: Tesseract Integration + PDF Pipeline ===
+# NOTE: leptess temporairement désactivé due to leptonica compatibility issues
+# leptess = "0.12"              # Tesseract Rust bindings (incompatible avec leptonica 1.86)
+image = "0.25"                # Manipulation d'images
+imageproc = "0.25"            # Preprocessing avancé (Otsu, transformations)
+regex = "1.10"                # Text post-processing
+lru = "0.12"                  # Cache LRU pour résultats OCR
+
+# PDF processing hybride intelligent (Original - peut causer des problèmes macOS)
+# pdfium-render = "0.8"         # PDF parsing + rasterisation robuste (DÉSACTIVÉ - problèmes libpdfium.dylib)
+# opencv = { version = "0.92", features = ["clang-runtime"] }  # Détection texte EAST (à installer plus tard)
+
+# === ALTERNATIVES PDF POUR macOS (sans dépendances externes) ===
+# Alternative #1: lopdf (Pure Rust - RECOMMANDÉ)
+lopdf = "0.32.0"              # Pure Rust PDF manipulation (Rust 2024 edition)
+
+# Alternative #2: pdf-extract (Simple)
+pdf-extract = "0.7.7"         # Simple text extraction (Pure Rust)
+
+# Alternative #3: poppler-utils (via Command - nécessite: brew install poppler)
+# Note: Pas de crate Rust, utilise pdftotext/pdftoppm via Command::new()
+
+# Alternative #4: mupdf-rs (Performant - nécessite: brew install mupdf-tools)
+# mupdf = "0.6.0"             # MuPDF bindings (AGPL license, décommenté si nécessaire)
+
+# Utilitaires pour les alternatives PDF
+# chrono déjà défini ligne 70
+
+# Unicode normalization pour RAG
+unicode-normalization = "0.1"  # Normalisation ligatures (ﬁ→fi, ﬂ→fl)
+
+# Test dependencies
+tempfile = "3.8"               # Fichiers temporaires pour tests
+
 [[bin]]
 name = "test_qdrant_simple"
 path = "test_qdrant_simple.rs"
@@ -94,3 +128,23 @@ path = "test_rag_pipeline_custom.rs"
 [[bin]]
 name = "benchmark_custom_e5"
 path = "benchmark_custom_e5.rs"
+
+[[bin]]
+name = "test_ocr_basic"
+path = "test_ocr_basic.rs"
+
+[[bin]]
+name = "test_ocr_deepseek_pdf"
+path = "test_ocr_deepseek_pdf.rs"
+
+[[bin]]
+name = "test_ocr_with_preview"
+path = "test_ocr_with_preview.rs"
+
+[[bin]]
+name = "test_pdf_simple"
+path = "test_pdf_simple.rs"
+
+[[bin]]
+name = "test_pdf_normalized"
+path = "test_pdf_normalized.rs"

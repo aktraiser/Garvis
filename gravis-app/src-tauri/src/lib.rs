@@ -1,10 +1,14 @@
 // GRAVIS - Application principale avec module RAG intégré
-// Phase 1: Intégration sécurisée du module RAG
+// Phase 2: Intégration complète RAG + OCR Command-based
 
-// Module RAG (Phase 1 - structures de base)
+// Module RAG (Phase 2 - avec OCR intégré)
 pub mod rag;
 
-use rag::DocumentGroup;
+use rag::{DocumentGroup, OcrState};
+use rag::ocr::commands::{
+    ocr_initialize, ocr_process_image, ocr_get_available_languages,
+    ocr_get_version, ocr_get_cache_stats, ocr_clear_cache, ocr_get_config
+};
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -42,20 +46,33 @@ async fn rag_get_status() -> Result<String, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Initialiser le logging pour le debugging RAG (simplifié pour Phase 1)
+    // Initialiser le logging pour le debugging RAG + OCR (Phase 2)
     tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
         .init();
 
-    tracing::info!("GRAVIS starting with RAG Module Phase 1");
+    tracing::info!("GRAVIS starting with RAG Module Phase 2 + OCR Integration");
+
+    // Créer l'état OCR global
+    let ocr_state = OcrState::new();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(ocr_state)
         .invoke_handler(tauri::generate_handler![
             greet,
             // RAG Commands Phase 1
             rag_create_group,
             rag_list_groups,
-            rag_get_status
+            rag_get_status,
+            // OCR Commands Phase 2
+            ocr_initialize,
+            ocr_process_image,
+            ocr_get_available_languages,
+            ocr_get_version,
+            ocr_get_cache_stats,
+            ocr_clear_cache,
+            ocr_get_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

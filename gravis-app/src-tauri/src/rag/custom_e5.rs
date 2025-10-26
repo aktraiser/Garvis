@@ -41,6 +41,7 @@ pub struct CustomE5Embedder {
     tokenizer: Tokenizer,
     embeddings: Tensor,         // word embeddings weights [vocab_size, 384]
     cache: Arc<EmbeddingCache>,
+    #[allow(dead_code)]
     config: CustomE5Config,
 }
 
@@ -50,7 +51,11 @@ impl CustomE5Embedder {
         info!("🔄 Initializing Custom E5 embedder: {}", config.model_id);
         
         // Setup HF Hub API
-        std::env::set_var("HF_TOKEN", "");
+        // Le token HF doit être défini via la variable d'environnement HF_TOKEN
+        // Exemple: export HF_TOKEN=hf_your_token_here
+        if std::env::var("HF_TOKEN").is_err() {
+            info!("⚠️  HF_TOKEN environment variable not set. Some models may require authentication.");
+        }
         
         let api = Api::new()
             .context("Failed to initialize HF Hub API")?;

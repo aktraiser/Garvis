@@ -1,45 +1,31 @@
-// GRAVIS RAG Module - Phase 2: Architecture Complete avec Embeddings
-// Architecture modulaire sécurisée pour préserver l'intégrité de l'application
+// GRAVIS RAG Module - Phase 4: Clean Production Architecture  
+// Architecture simplifiée avec CustomE5 + QdrantRest pour stabilité maximum
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-// === Modules Phase 2 & 3 ===
-pub mod embedder;
+// === Modules Phase 4: Clean Architecture ===
 pub mod custom_e5;
-pub mod qdrant;
 pub mod qdrant_rest;
-pub mod device_pool;
-pub mod embedding_batcher;
-pub mod document_sync_manager;
-// pub mod benchmark; // Désactivé temporairement pour les erreurs
+pub mod ocr;
 
-// Phase 2 exports
-pub use embedder::{E5Config, E5Embedder};
+// Phase 4 exports - Production ready
 pub use custom_e5::{CustomE5Config, CustomE5Embedder};
-
-// Phase 3 exports
-pub use qdrant::{
-    OptimizedQdrantClient, QdrantConfig, EmbeddingPoint, EmbeddingPayload,
-    SearchFilters, SearchResult, CollectionStats
-};
 pub use qdrant_rest::{
     QdrantRestClient, QdrantRestConfig, RestPoint, RestSearchResponse
 };
-pub use device_pool::{
-    DevicePool, DevicePoolConfig, DevicePoolStats, GlobalDevicePool
+// Phase 2 OCR exports - Command-based implementation
+pub use ocr::{
+    OcrConfig, OcrResult, OcrPageResult, TesseractProcessor, TesseractConfig,
+    PageSegMode, OcrEngineMode, BoundingBox, OcrMetadata, OcrError, OcrCache,
+    CacheConfig, PreprocessConfig, PerformanceConfig, get_available_languages,
+    get_tesseract_version, detect_file_format, FileFormat
 };
-pub use embedding_batcher::{
-    EmbeddingBatcher, EmbeddingBatcherConfig, EmbeddingJob, BatcherStats
-};
-pub use document_sync_manager::{
-    DocumentSyncManager, SyncManagerConfig, SyncMetadata, SyncStatus, SyncStats
-};
-// pub use benchmark::{
-//     RagBenchmark, BenchmarkConfig, BenchmarkResults, run_benchmark_cli
-// };
+
+// OCR Commands pour Tauri - Phase 2
+pub use ocr::commands::{OcrCommands, OcrState, OcrCommandResponse};
 
 // === Core Data Structures (Phase 1) ===
 
@@ -123,12 +109,17 @@ pub struct GroupDocument {
     pub group_id: String,
 }
 
-/// Type de document
+/// Type de document avec support OCR Phase 2
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DocumentType {
     SourceCode { language: String },
-    PDF { has_text: bool, pages: usize },
-    Image { ocr_confidence: f32 },
+    PDF { has_text: bool, pages: usize, ocr_processed: bool },
+    Image { 
+        ocr_confidence: f32, 
+        preprocessing_applied: bool,
+        tesseract_version: Option<String>,
+        detected_language: Option<String>
+    },
     Markdown,
     PlainText,
 }
