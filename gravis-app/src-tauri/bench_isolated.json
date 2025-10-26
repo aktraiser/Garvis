@@ -1,0 +1,45 @@
+{
+  "config": {
+    "chunks": 1000,
+    "queries": 50,
+    "batch_size": 256,
+    "force_index": true,
+    "ef_search": 64,
+    "transport": "Rest",
+    "recall_test": true
+  },
+  "indexing": {
+    "total_time_secs": 0.583057167,
+    "upsert_time_secs": 0.569588,
+    "throughput_chunks_per_sec": 1715.0976895546848,
+    "points_stored": 1000,
+    "points_expected": 1000,
+    "success_rate": 100.0
+  },
+  "search": {
+    "total_time_secs": 0.162532667,
+    "queries_per_second": 307.6304654497548,
+    "latency_ms": {
+      "min": 1.945,
+      "avg": 3.0233799999999995,
+      "p50": 2.638,
+      "p95": 4.177,
+      "p99": 15.169,
+      "max": 15.169
+    },
+    "total_results": 500,
+    "avg_results_per_query": 10.0
+  },
+  "index_status": {
+    "hnsw_enabled": true,
+    "indexed_vectors": 1000,
+    "total_vectors": 1000,
+    "optimizer_status": "ok",
+    "indexing_percentage": 100.0
+  },
+  "system": {
+    "embedding_cache_entries": 26,
+    "embedding_cache_mb": 0
+  },
+  "timestamp": "2025-10-26T06:20:20.765416+00:00"
+}

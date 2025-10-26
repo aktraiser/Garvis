@@ -1,0 +1,9 @@
+{
+  "chunks_count": 1000,
+  "chunk_size_range": [256, 1024],
+  "ef_search_values": [32, 64, 128],
+  "search_queries": 100,
+  "batch_sizes": [32, 64, 128],
+  "collections": ["benchmark_test"],
+  "output_path": "benchmark_results.json"
+}

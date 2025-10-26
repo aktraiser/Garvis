@@ -1,0 +1,96 @@
+[package]
+name = "gravis-app"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "gravis_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# === Phase 1 RAG: Core Dependencies (Ajout progressif) ===
+# Async & Utils (base robuste)
+tokio = { version = "1.0", features = ["full"] }
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Hash et cache (pour embeddings)
+blake3 = "1.5"
+
+# Collections thread-safe
+dashmap = "5.5"
+
+# UUID pour les IDs uniques
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# === Phase 2 RAG: ML & Embeddings ===
+# Candle ecosystem - stable 0.6.x series (production tested)
+candle-core = "0.6.0"
+candle-nn = "0.6.0"
+candle-transformers = "0.6.0"
+
+# Compatible ML ecosystem avec features nécessaires - mise à jour vers 0.4.3 (fix URL bug)
+hf-hub = { version = "0.4.3", features = ["tokio"] }
+tokenizers = "0.15.2"
+
+# Qdrant client pour la vectorisation - version 1.15.0 compatible avec serveur 1.15.5
+qdrant-client = "1.15.0"
+
+# Futures pour async
+futures = "0.3"
+
+# HTTP client pour Qdrant REST API (workaround gRPC issues)
+reqwest = { version = "0.12", features = ["json"] }
+
+# === Fixes pour compatibilité f16/rand (fix de la recherche) ===
+# Pin problematic dependencies pour éviter les erreurs de compilation
+rand = "=0.8.5"
+rand_distr = "=0.4.3"
+half = "=2.3.1"
+
+# === Benchmark Dependencies ===
+# Pour l'outil de benchmark de performance
+chrono = { version = "0.4", features = ["serde"] }
+num_cpus = "1.16"
+clap = { version = "4.4", features = ["derive"] }
+
+[[bin]]
+name = "test_qdrant_simple"
+path = "test_qdrant_simple.rs"
+
+[[bin]]
+name = "test_rest_only"
+path = "test_rest_only.rs"
+
+[[bin]]
+name = "test_embedding_simple"
+path = "test_embedding_simple.rs"
+
+[[bin]]
+name = "test_custom_e5"
+path = "test_custom_e5.rs"
+
+[[bin]]
+name = "test_rag_pipeline_custom"
+path = "test_rag_pipeline_custom.rs"
+
+[[bin]]
+name = "benchmark_custom_e5"
+path = "benchmark_custom_e5.rs"

@@ -1,0 +1,80 @@
+# GRAVIS RAG - Docker Compose pour Qdrant Production
+# Configuration optimisée selon les recommandations expertes
+
+version: '3.8'
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.7.0
+    container_name: gravis-qdrant
+    ports:
+      - "6333:6333"  # HTTP API
+      - "6334:6334"  # gRPC API
+    volumes:
+      - ./qdrant_data:/qdrant/storage
+      - ./qdrant_config:/qdrant/config
+    environment:
+      # Configuration serveur
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__SERVICE__ENABLE_CORS=true
+      
+      # Optimisations performances (recommandations expertes)
+      - QDRANT__STORAGE__PERFORMANCE__MAX_SEARCH_THREADS=4
+      - QDRANT__STORAGE__OPTIMIZERS__MEMMAP_THRESHOLD=50000
+      - QDRANT__STORAGE__OPTIMIZERS__MAX_SEGMENT_SIZE=200000
+      - QDRANT__STORAGE__OPTIMIZERS__DEFAULT_SEGMENT_NUMBER=2
+      
+      # Configuration mémoire et index
+      - QDRANT__STORAGE__HNSW__M=16
+      - QDRANT__STORAGE__HNSW__EF_CONSTRUCT=200
+      - QDRANT__STORAGE__HNSW__FULL_SCAN_THRESHOLD=1000
+      - QDRANT__STORAGE__HNSW__MAX_INDEXING_THREADS=4
+      
+      # Quantization par défaut (Int8 pour réduction mémoire)
+      - QDRANT__STORAGE__QUANTIZATION__ALWAYS_RAM=false
+      
+      # Configuration log
+      - RUST_LOG=qdrant=info,vector_index=warn
+      
+    deploy:
+      resources:
+        limits:
+          memory: 2G          # Limite mémoire selon recommandations
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+    
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Service optionnel pour monitoring (peut être activé plus tard)
+  qdrant-dashboard:
+    image: qdrant/qdrant-web-ui:latest
+    container_name: gravis-qdrant-dashboard
+    ports:
+      - "8080:80"
+    environment:
+      - QDRANT_API_URL=http://qdrant:6333
+    depends_on:
+      - qdrant
+    profiles:
+      - monitoring
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:
+    name: gravis-qdrant-data
+  qdrant_config:
+    name: gravis-qdrant-config
+
+networks:
+  default:
+    name: gravis-rag-network
