@@ -2220,6 +2220,7 @@ dependencies = [
  "lopdf 0.32.0",
  "lru",
  "num_cpus",
+ "once_cell",
  "pdf-extract",
  "qdrant-client",
  "rand 0.8.5",

@@ -4,8 +4,13 @@ version = "0.1.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
+default-run = "gravis-app"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "gravis-app"
+path = "src/main.rs"
 
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
@@ -70,13 +75,14 @@ half = "=2.3.1"
 chrono = { version = "0.4", features = ["serde"] }
 num_cpus = "1.16"
 clap = { version = "4.4", features = ["derive"] }
+once_cell = "1.19"
 
 # === Phase 4 OCR: Tesseract Integration + PDF Pipeline ===
 # NOTE: leptess temporairement désactivé due to leptonica compatibility issues
 # leptess = "0.12"              # Tesseract Rust bindings (incompatible avec leptonica 1.86)
 image = "0.25"                # Manipulation d'images
 imageproc = "0.25"            # Preprocessing avancé (Otsu, transformations)
-regex = "1.10"                # Text post-processing
+regex = "1.10"                # Text post-processing + document classification
 lru = "0.12"                  # Cache LRU pour résultats OCR
 
 # PDF processing hybride intelligent (Original - peut causer des problèmes macOS)
@@ -148,3 +154,59 @@ path = "test_pdf_simple.rs"
 [[bin]]
 name = "test_pdf_normalized"
 path = "test_pdf_normalized.rs"
+
+[[bin]]
+name = "test_document_processor_phase1"
+path = "test_document_processor_phase1.rs"
+
+[[bin]]
+name = "test_phase2_integration"
+path = "test_phase2_integration.rs"
+
+[[bin]]
+name = "test_phase2_pdf_ocr_complete"
+path = "test_phase2_pdf_ocr_complete.rs"
+
+[[bin]]
+name = "test_phase2_pdf_simple"
+path = "test_phase2_pdf_simple.rs"
+
+[[bin]]
+name = "test_phase2_pdf_rag_complete"
+path = "test_phase2_pdf_rag_complete.rs"
+
+[[bin]]
+name = "test_phase2_simplified_rag"
+path = "test_phase2_simplified_rag.rs"
+
+[[bin]]
+name = "test_document_classifier"
+path = "test_document_classifier.rs"
+
+[[bin]]
+name = "test_business_metadata"
+path = "test_business_metadata.rs"
+
+[[bin]]
+name = "test_business_adaptive_chunking"
+path = "test_business_adaptive_chunking.rs"
+
+[[bin]]
+name = "test_business_adaptive_chunking_real"
+path = "test_business_adaptive_chunking_real.rs"
+
+[[bin]]
+name = "test_unicode_normalization"
+path = "test_unicode_normalization.rs"
+
+[[bin]]
+name = "test_business_metadata_enhanced"
+path = "test_business_metadata_enhanced.rs"
+
+[[bin]]
+name = "test_kpi_debug"
+path = "test_kpi_debug.rs"
+
+[[bin]]
+name = "test_pipeline_complete_e2e"
+path = "test_pipeline_complete_e2e.rs"

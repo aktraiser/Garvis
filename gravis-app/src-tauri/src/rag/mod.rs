@@ -7,13 +7,22 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 // === Modules Phase 4: Clean Architecture ===
-pub mod custom_e5;
-pub mod qdrant_rest;
+// Core components
+pub mod core;
+// Search and retrieval
+pub mod search;
+// Document processing
+pub mod processing;
+// Text normalization
+pub mod text;
+// OCR functionality
 pub mod ocr;
+// Tauri commands
+pub mod commands;
 
 // Phase 4 exports - Production ready
-pub use custom_e5::{CustomE5Config, CustomE5Embedder};
-pub use qdrant_rest::{
+pub use search::{CustomE5Config, CustomE5Embedder};
+pub use core::{
     QdrantRestClient, QdrantRestConfig, RestPoint, RestSearchResponse
 };
 // Phase 2 OCR exports - Command-based implementation
@@ -26,6 +35,38 @@ pub use ocr::{
 
 // OCR Commands pour Tauri - Phase 2
 pub use ocr::commands::{OcrCommands, OcrState, OcrCommandResponse};
+
+// Core components exports
+pub use core::{
+    EmbedderManager, get_embedder, get_embedder_with_config,
+    IngestionEngine, StrategyDetector, IngestionStrategy, IngestionResult,
+    BatchIngestionResult, CacheStats,
+    UnifiedCache, CachedDocument, CacheCleanupResult, CacheMetrics
+};
+
+// Processing exports
+pub use processing::{
+    DocumentProcessor, DocumentClassifier, DocumentCategory, BusinessSignals,
+    SmartChunker, SmartChunkConfig, SmartChunkResult, ChunkSection,
+    BusinessMetadata, BusinessSection, FinancialKPI, BusinessMetadataEnricher
+};
+
+// Search exports
+pub use search::{
+    MMRReranker, SearchResult as MMRSearchResult,
+    SearchEngine, EnhancedSearchResult, QueryIntent, l2_normalize, 
+    detect_query_intent, compute_hybrid_score
+};
+
+// Text normalization exports
+pub use text::{
+    LigatureCleaner, record_ligature_global, log_ligature_summary_global, reset_ligature_counters_global,
+    sanitize_pdf_text, detect_ligatures, clean_extracted_text, NormalizationStats
+};
+pub use commands::{
+    RagState, DocumentIngestionResponse, SearchResponseWithMetadata, SearchResultWithMetadata,
+    AdvancedSearchParams, DocumentMetadataResponse, CacheStats as CommandsCacheStats
+};
 
 // === Core Data Structures (Phase 1) ===
 
@@ -109,19 +150,30 @@ pub struct GroupDocument {
     pub group_id: String,
 }
 
-/// Type de document avec support OCR Phase 2
+/// Type de document avec stratégies intelligentes - Phase 1 OCR
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DocumentType {
     SourceCode { language: String },
-    PDF { has_text: bool, pages: usize, ocr_processed: bool },
+    PDF { 
+        extraction_strategy: PdfStrategy,
+        native_text_ratio: f32,
+        ocr_pages: Vec<usize>,
+        total_pages: usize,
+    },
     Image { 
-        ocr_confidence: f32, 
-        preprocessing_applied: bool,
-        tesseract_version: Option<String>,
-        detected_language: Option<String>
+        ocr_result: OcrResult,
+        preprocessing_config: PreprocessConfig,
     },
     Markdown,
     PlainText,
+}
+
+/// Stratégie d'extraction PDF intelligente - Phase 1 OCR
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum PdfStrategy {
+    NativeOnly,         // Extraction native uniquement
+    OcrOnly,           // OCR uniquement (PDF scanné)
+    HybridIntelligent, // Pipeline hybride avec heuristiques
 }
 
 /// Chunk enrichi avec métadonnées
@@ -148,6 +200,25 @@ pub enum ChunkType {
     Comment,
 }
 
+/// Type de source pour l'extraction - Phase 1 OCR
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum SourceType {
+    NativeText,        // Texte directement lisible
+    OcrExtracted,      // Texte extrait par OCR
+    HybridPdfNative,   // PDF avec texte natif
+    HybridPdfOcr,      // PDF avec zones OCR
+}
+
+/// Méthode d'extraction utilisée - Phase 1 OCR
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ExtractionMethod {
+    DirectRead,                                    // Lecture directe fichier
+    TesseractOcr { confidence: f32, language: String }, // OCR Tesseract
+    PdfNative,                                     // Extraction PDF native
+    PdfOcrFallback,                               // PDF fallback OCR
+    HybridIntelligent,                            // Pipeline hybride
+}
+
 /// Métadonnées par chunk
 #[derive(Debug, Clone, Serialize, Deserialize)]  
 pub struct ChunkMetadata {
@@ -157,6 +228,10 @@ pub struct ChunkMetadata {
     pub symbol: Option<String>, // Nom fonction/classe si AST
     pub context: Option<String>, // Contexte parent (imports, etc.)
     pub confidence: f32, // Score qualité du chunking
+    // === Métadonnées OCR - Phase 1 ===
+    pub ocr_metadata: Option<crate::rag::ocr::OcrMetadata>,
+    pub source_type: SourceType,
+    pub extraction_method: ExtractionMethod,
 }
 
 /// Métadonnées document enrichies

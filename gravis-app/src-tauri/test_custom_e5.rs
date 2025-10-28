@@ -1,5 +1,5 @@
 // Test pour l'embedder E5 personnalisé (384D direct)
-use gravis_app_lib::rag::custom_e5::{CustomE5Embedder, CustomE5Config};
+use gravis_app_lib::rag::{CustomE5Embedder, CustomE5Config};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
+import { invoke } from '@tauri-apps/api/core';
+import { RagWindow } from './RagWindow';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -28,7 +30,6 @@ import {
   RotateCcw
 } from "lucide-react";
 import { LiteLLMClient, modelConfigStore, AVAILABLE_MODELS } from "@/lib/litellm";
-import { RagStore, RagClient, DocumentGroup } from "@/lib/rag";
 
 export function CommandInterface() {
   const [query, setQuery] = useState("");
@@ -40,7 +41,46 @@ export function CommandInterface() {
   const [isThinking, setIsThinking] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showModelSelector, setShowModelSelector] = useState(false);
-  const [showRagModal, setShowRagModal] = useState(false);
+  const [showRagWindow, setShowRagWindow] = useState(false);
+  
+  const openRagWindow = async () => {
+    try {
+      console.log('Opening RAG Storage window...');
+      await invoke('open_rag_storage_window');
+      console.log('RAG window created successfully');
+    } catch (error) {
+      console.error('Failed to create RAG window:', error);
+      // Fallback to modal if window creation fails
+      console.log('Falling back to modal');
+      setShowRagWindow(true);
+    }
+  };
+
+  const openSettingsWindow = async () => {
+    try {
+      console.log('Opening Settings window...');
+      await invoke('open_settings_window');
+      console.log('Settings window created successfully');
+    } catch (error) {
+      console.error('Failed to create Settings window:', error);
+      // Fallback to modal if window creation fails
+      console.log('Falling back to modal');
+      setShowSettings(true);
+    }
+  };
+
+  const openModelSelectorWindow = async () => {
+    try {
+      console.log('Opening Model Selector window...');
+      await invoke('open_model_selector_window');
+      console.log('Model Selector window created successfully');
+    } catch (error) {
+      console.error('Failed to create Model Selector window:', error);
+      // Fallback to modal if window creation fails
+      console.log('Falling back to modal');
+      setShowModelSelector(true);
+    }
+  };
   const [currentModel, setCurrentModel] = useState(modelConfigStore.currentModel);
   const [conversationHistory, setConversationHistory] = useState<Array<{
     id: string;
@@ -333,7 +373,7 @@ export function CommandInterface() {
             type="button" 
             className="icon-button" 
             title="RAG - Gestion des documents"
-            onClick={() => setShowRagModal(true)}
+            onClick={openRagWindow}
           >
             <FileText size={14} />
           </button>
@@ -347,7 +387,7 @@ export function CommandInterface() {
             type="button" 
             className="icon-button" 
             title="Sélectionner le modèle"
-            onClick={() => setShowModelSelector(!showModelSelector)}
+            onClick={openModelSelectorWindow}
           >
             <Bot size={14} />
           </button>
@@ -355,7 +395,7 @@ export function CommandInterface() {
             type="button" 
             className="icon-button" 
             title="Configuration"
-            onClick={() => setShowSettings(!showSettings)}
+            onClick={openSettingsWindow}
           >
             <Settings size={14} />
           </button>
@@ -472,12 +512,11 @@ export function CommandInterface() {
         document.body
       )}
 
-      {/* RAG Modal - rendered outside via portal */}
-      {showRagModal && createPortal(
-        <RagModal 
-          onClose={() => setShowRagModal(false)}
-        />,
-        document.body
+      {/* RAG Window - Full screen overlay */}
+      {showRagWindow && (
+        <RagWindow 
+          onClose={() => setShowRagWindow(false)}
+        />
       )}
     </div>
   );
@@ -807,249 +846,6 @@ function ThinkingModal({ thinking, onClose }: { thinking: string; onClose: () =>
           >
             {thinking}
           </ReactMarkdown>
-        </div>
-      </div>
-    </>
-  );
-}
-
-function RagModal({ onClose }: { onClose: () => void }) {
-  const [selectedGroup, setSelectedGroup] = useState<string>('');
-  const [chunkSize, setChunkSize] = useState(512);
-  const [overlap, setOverlap] = useState(64);
-  const [strategy, setStrategy] = useState('AST-First');
-  const [tags, setTags] = useState('');
-  const [priority, setPriority] = useState('Normal');
-  const [language, setLanguage] = useState('Auto-detect');
-  const [groups, setGroups] = useState<DocumentGroup[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-
-  // Load groups on mount
-  useEffect(() => {
-    const loadGroups = async () => {
-      setIsLoading(true);
-      try {
-        await RagStore.loadGroups();
-      } catch (error) {
-        console.error('Error loading groups:', error);
-      }
-      setIsLoading(false);
-    };
-
-    loadGroups();
-
-    // Subscribe to groups changes
-    const unsubscribe = RagStore.subscribe((updatedGroups) => {
-      setGroups(updatedGroups);
-    });
-
-    return unsubscribe;
-  }, []);
-
-  const createNewGroup = async () => {
-    const name = prompt('Nom du nouveau groupe:');
-    if (name) {
-      try {
-        setIsLoading(true);
-        await RagStore.createGroup(name, {
-          chunk_size: chunkSize,
-          overlap: overlap,
-          strategy: strategy as any
-        });
-      } catch (error) {
-        console.error('Error creating group:', error);
-        alert('Erreur lors de la création du groupe');
-      }
-      setIsLoading(false);
-    }
-  };
-
-  const toggleGroup = async (groupId: string) => {
-    try {
-      setIsLoading(true);
-      await RagStore.toggleGroup(groupId);
-    } catch (error) {
-      console.error('Error toggling group:', error);
-      alert('Erreur lors de la modification du groupe');
-    }
-    setIsLoading(false);
-  };
-
-  const deleteGroup = async (groupId: string) => {
-    if (confirm('Êtes-vous sûr de vouloir supprimer ce groupe ?')) {
-      try {
-        setIsLoading(true);
-        await RagStore.deleteGroup(groupId);
-      } catch (error) {
-        console.error('Error deleting group:', error);
-        alert('Erreur lors de la suppression du groupe');
-      }
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <>
-      <div className="dropdown-overlay" onClick={onClose} />
-      <div className="rag-modal">
-        <div className="rag-modal-header">
-          <div className="rag-modal-title">
-            <FileText size={20} />
-            <h2>RAG - Gestion des Documents</h2>
-          </div>
-          <button onClick={onClose} className="close-button">×</button>
-        </div>
-        
-        <div className="rag-modal-content">
-          {/* Section Groupes */}
-          <div className="rag-section">
-            <h3>Groupes de Documents</h3>
-            <div className="groups-list">
-              {isLoading && groups.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '20px', color: '#9ca3af' }}>
-                  Chargement des groupes...
-                </div>
-              ) : groups.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '20px', color: '#9ca3af' }}>
-                  Aucun groupe créé. Créez votre premier groupe !
-                </div>
-              ) : (
-                groups.map((group) => (
-                  <div key={group.id} className={`group-item ${group.active ? 'active' : ''}`}>
-                    <div className="group-info">
-                      <span className="group-icon">📁</span>
-                      <span className="group-name">{group.name}</span>
-                      <span className={`group-status ${group.active ? 'active' : 'inactive'}`}>
-                        {group.active ? '●' : '○'}
-                      </span>
-                      <span className="group-count">{group.documents?.length || 0} docs</span>
-                    </div>
-                    <div className="group-actions">
-                      <button 
-                        className="group-action-btn"
-                        onClick={() => toggleGroup(group.id)}
-                        title={group.active ? 'Désactiver' : 'Activer'}
-                      >
-                        {group.active ? 'ON' : 'OFF'}
-                      </button>
-                      <button 
-                        className="group-action-btn edit"
-                        title="Éditer"
-                      >
-                        Edit
-                      </button>
-                      <button 
-                        className="group-action-btn delete"
-                        onClick={() => deleteGroup(group.id)}
-                        title="Supprimer"
-                      >
-                        Del
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-              
-              <button className="new-group-btn" onClick={createNewGroup}>
-                + Nouveau Groupe
-              </button>
-            </div>
-          </div>
-
-          {/* Section Upload & Configuration */}
-          <div className="rag-section">
-            <h3>Upload & Configuration</h3>
-            
-            {/* Zone d'upload */}
-            <div className="upload-zone">
-              <div className="upload-placeholder">
-                📁 Glissez-déposez vos fichiers ici...
-                <br />
-                <small>Support: PDF, TXT, MD, JS, TS, PY</small>
-              </div>
-              <button className="browse-btn">Parcourir</button>
-            </div>
-
-            {/* Configuration */}
-            <div className="upload-config">
-              <div className="config-row">
-                <label>Groupe cible:</label>
-                <select value={selectedGroup} onChange={(e) => setSelectedGroup(e.target.value)}>
-                  <option value="">Sélectionner un groupe</option>
-                  {groups.map(group => (
-                    <option key={group.id} value={group.id}>{group.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="config-section">
-                <h4>⚙️ Paramètres de Chunking</h4>
-                <div className="config-row">
-                  <label>Chunk Size: {chunkSize} tokens</label>
-                  <input 
-                    type="range" 
-                    min="256" 
-                    max="1024" 
-                    value={chunkSize} 
-                    onChange={(e) => setChunkSize(Number(e.target.value))}
-                  />
-                </div>
-                <div className="config-row">
-                  <label>Overlap: {overlap} tokens</label>
-                  <input 
-                    type="range" 
-                    min="32" 
-                    max="128" 
-                    value={overlap} 
-                    onChange={(e) => setOverlap(Number(e.target.value))}
-                  />
-                </div>
-                <div className="config-row">
-                  <label>Strategy:</label>
-                  <select value={strategy} onChange={(e) => setStrategy(e.target.value)}>
-                    <option value="AST-First">AST-First</option>
-                    <option value="Heuristic">Heuristic</option>
-                    <option value="Hybrid">Hybrid</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="config-section">
-                <h4>🏷️ Métadonnées</h4>
-                <div className="config-row">
-                  <label>Tags:</label>
-                  <input 
-                    type="text" 
-                    placeholder="frontend, react, components" 
-                    value={tags}
-                    onChange={(e) => setTags(e.target.value)}
-                  />
-                </div>
-                <div className="config-row">
-                  <label>Priority:</label>
-                  <select value={priority} onChange={(e) => setPriority(e.target.value)}>
-                    <option value="Low">Low</option>
-                    <option value="Normal">Normal</option>
-                    <option value="High">High</option>
-                  </select>
-                </div>
-                <div className="config-row">
-                  <label>Language:</label>
-                  <select value={language} onChange={(e) => setLanguage(e.target.value)}>
-                    <option value="Auto-detect">Auto-detect</option>
-                    <option value="JavaScript">JavaScript</option>
-                    <option value="TypeScript">TypeScript</option>
-                    <option value="Python">Python</option>
-                    <option value="Rust">Rust</option>
-                  </select>
-                </div>
-              </div>
-
-              <button className="index-btn" disabled={!selectedGroup}>
-                Indexer Documents
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </>

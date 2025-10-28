@@ -183,13 +183,13 @@ async fn ocr_get_supported_languages() -> Result<Vec<String>, String> {
 - ✅ **Architecture modulaire** créée et prête
 - ✅ **Approche Command-based** validée (alternative à leptess)
 
-### **Phase 2 : Implémentation Command-based + Configuration (1 semaine)** 🔄 PROCHAINE
+### **Phase 2 : Implémentation Command-based + Configuration (1 semaine)** ✅ TERMINÉE
 
-#### **Objectifs Révisés (Command-based)**
-- Implémenter TesseractProcessor via Command::new("tesseract") 
-- Preprocessing d'images via crate image (sans leptess)
-- Configuration fine des paramètres PSM/OEM pour documents variés
-- Cache Blake3 + LRU pour optimiser les performances
+#### **Objectifs Révisés (Command-based)** ✅
+- ✅ Implémenter TesseractProcessor via Command::new("tesseract") 
+- ✅ Preprocessing d'images via crate image + imageproc (Otsu, transformations)
+- ✅ Configuration fine des paramètres PSM/OEM pour documents variés
+- ✅ Cache Blake3 + LRU pour optimiser les performances
 
 #### **Fonctionnalités Clés Révisées (Command-based)**
 ```rust
@@ -255,7 +255,15 @@ impl TesseractProcessor {
 }
 ```
 
-### **Phase 3 : Interface Utilisateur Simple (1 semaine)**
+### **Phase 3 : Pipeline PDF Hybride Intelligent (1 semaine)** ✅ TERMINÉE
+
+#### **Objectifs** ✅
+- ✅ Implémenter extraction PDF native (pdf-extract, lopdf, poppler-utils)
+- ✅ Pipeline hybride intelligent : texte natif + OCR ciblé uniquement sur pages sans texte
+- ✅ Normalisation Unicode complète pour optimisation RAG
+- ✅ Commandes Tauri intégrées et testées
+
+### **Phase 4 : Interface Utilisateur Simple (1 semaine)** 📋 PROCHAINE
 
 #### **Objectifs**
 - Ajouter l'upload de PDF/images dans la modale RAG
@@ -331,7 +339,7 @@ const OcrPreview = ({ result }: { result: OcrResult }) => {
 };
 ```
 
-### **Phase 4 : Optimisations Production (1 semaine)**
+### **Phase 5 : Optimisations Production (1 semaine)** 📋 PROCHAINE
 
 #### **Objectifs**
 - Cache intelligent des résultats OCR Tesseract
@@ -557,9 +565,10 @@ brew install tesseract tesseract-lang
 
 #### **Roadmap d'Adoption Actualisée**
 - ✅ **Phase 1** : Infrastructure Tesseract validée (1 semaine) - **TERMINÉE**
-- 🔄 **Phase 2** : Implémentation Command-based + configuration PSM/OEM (1 semaine) - **PROCHAINE**
-- 📋 **Phase 3** : Interface utilisateur simple (1 semaine)
-- 📋 **Phase 4** : Optimisations production + cache (1 semaine)
+- ✅ **Phase 2** : Implémentation Command-based + configuration PSM/OEM (1 semaine) - **TERMINÉE**
+- ✅ **Phase 3** : Pipeline PDF hybride + normalisation Unicode (1 semaine) - **TERMINÉE**
+- 📋 **Phase 4** : Interface utilisateur et upload (1 semaine) - **PROCHAINE**
+- 📋 **Phase 5** : Optimisations production + cache avancé (1 semaine)
 
 #### **Critères de Succès**
 - ✅ **Intégration seamless** dans le workflow RAG existant
@@ -578,7 +587,7 @@ brew install tesseract tesseract-lang
 
 ---
 
-## 🎉 STATUS ACTUEL - PHASE 1 TERMINÉE
+## 🎉 STATUS ACTUEL - PHASES 1-3 TERMINÉES
 
 ### **✅ VALIDATION PHASE 1 RÉUSSIE** (26 octobre 2025)
 
@@ -590,14 +599,85 @@ brew install tesseract tesseract-lang
 - ✅ **Architecture modulaire** créée et prête
 - ✅ **Approche Command-based** validée comme alternative à leptess
 
+### **✅ PHASE 2 TERMINÉE** (26 octobre 2025)
+
+**Implémentation Command-based + Configuration** :
+- ✅ **TesseractProcessor** fonctionnel via Command::new("tesseract")
+- ✅ **Preprocessing avancé** : imageproc avec binarisation Otsu, contrast, resize
+- ✅ **Configuration PSM/OEM** : auto-détection + modes manuels
+- ✅ **Cache Blake3 + LRU** : système de cache intelligent implémenté
+- ✅ **Tests d'intégration** : validation sur documents réels
+- ✅ **Commandes Tauri** : ocr_process_image, ocr_process_pdf, etc.
+
+### **✅ PHASE 3 TERMINÉE** (26 octobre 2025)
+
+**Pipeline PDF Hybride Intelligent** :
+- ✅ **Extraction PDF native** : pdf-extract, lopdf, fallback poppler-utils
+- ✅ **Pipeline hybride** : texte natif prioritaire, OCR ciblé sur images/pages scannées  
+- ✅ **Normalisation Unicode** : TextCleaner production-ready avec métriques
+  - Ligatures (ﬁ→fi, ﬂ→fl), NBSP, espaces invisibles, hyphénation
+  - Système de score adaptatif pour éviter normalisation inutile
+  - NormalizationReport sérialisable pour payload Qdrant
+- ✅ **Tests robustes** : 13/13 tests passent, idempotence validée
+- ✅ **Performance optimisée** : détection automatique évite processing inutile
+
+#### **Métriques Validées Phase 3** :
+- **PDF DeepSeek-OCR** : 54,661 chars extraits en 0.52s
+- **Normalisation intelligente** : détection automatique, pas de traitement si inutile
+- **Hyphénation efficace** : 28 jonctions de mots recollés pour améliorer recherche
+- **Token stability** : 80-105% ratio (effet bénéfique hyphénation)
+- **Cache hit optimization** : évite retraitement sur documents identiques
+
 ### **🔄 PROCHAINES ÉTAPES**
-- **Phase 2** : Implémentation TesseractProcessor via Command::new("tesseract")
-- **Phase 3** : Interface utilisateur et intégration Tauri 
-- **Phase 4** : Optimisations production et cache Blake3
+- **Phase 4** : Interface utilisateur et upload PDF/images 
+- **Phase 5** : Optimisations production et cache avancé
+- **Phase 6** : Détection zones texte images (OpenCV EAST)
+- **Phase 7** : Métriques et monitoring RagMetrics
 
 ---
 
 *Feuille de route créée le : 26 octobre 2025*  
 *Dernière mise à jour : 26 octobre 2025*  
-*Status : **Phase 1 TERMINÉE ✅ - Phase 2 PRÊTE** 🚀*  
+*Status : **Phases 1-3 TERMINÉES ✅ - Pipeline OCR Production-Ready** 🚀*  
 *Priorité : **Haute** - Extension critique du système RAG*
+
+## 📋 Modules Livrés
+
+### **Modules OCR Fonctionnels**
+```
+src-tauri/src/rag/ocr/
+├── mod.rs                    ✅ Module principal OCR
+├── commands.rs               ✅ Commandes Tauri (ocr_process_*)
+├── cache.rs                  ✅ Cache Blake3 + LRU intelligent  
+├── preprocessor.rs           ✅ Preprocessing imageproc (Otsu, etc.)
+├── tesseract.rs             ✅ TesseractProcessor Command-based
+├── pdf_extract_simple.rs    ✅ Extraction PDF native (pdf-extract)
+├── pdf_lopdf.rs             ✅ Alternative lopdf 
+├── pdf_poppler_utils.rs     ✅ Fallback poppler-utils
+└── text_normalizer.rs       ✅ TextCleaner production + Unicode normalization
+```
+
+### **API Production-Ready**
+```rust
+// API principale TextCleaner
+impl TextCleaner {
+    pub fn normalize(input: &str) -> (String, NormalizationReport);
+    pub fn normalize_fast(input: &str) -> String;
+    pub fn needs_normalization(input: &str) -> bool;
+}
+
+// Pipeline PDF hybride intelligent
+pub fn extract_pdf_with_normalization(path: &Path) -> Result<(String, NormalizationReport)>;
+
+// Commandes Tauri intégrées
+#[tauri::command] async fn ocr_process_image(...);
+#[tauri::command] async fn ocr_process_pdf(...);
+#[tauri::command] async fn ocr_get_tesseract_info(...);
+```
+
+### **Tests Validés** ✅
+- **13/13 tests** de normalisation passent  
+- **Idempotence** : normalize(normalize(x)) == normalize(x)
+- **Performance** : heuristique <10ms, évite traitement inutile
+- **Régression** : token stability 80-105% (bénéfique pour recherche)
+- **Sérialisation** : NormalizationReport → JSON pour payload Qdrant
