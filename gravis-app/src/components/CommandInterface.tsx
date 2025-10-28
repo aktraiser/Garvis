@@ -88,6 +88,15 @@ export function CommandInterface() {
     content: string;
     thinking?: string;
     timestamp: Date;
+    metrics?: {
+      tokensPerSecond?: number;
+      totalTokens?: number;
+      inputTokens?: number;
+      outputTokens?: number;
+      timeToFirstToken?: number;
+      processingTime?: number;
+      stopReason?: string;
+    };
   }>>([]);
 
   // Update current model when store changes
@@ -140,13 +149,14 @@ export function CommandInterface() {
   }, [conversationHistory.length, isProcessing]);
 
   // Helper function to add assistant response to conversation history
-  const addAssistantResponse = (content: string, thinkingContent?: string) => {
+  const addAssistantResponse = (content: string, thinkingContent?: string, metrics?: any) => {
     const assistantMessage = {
       id: (Date.now() + 1).toString(),
       type: 'assistant' as const,
       content,
       thinking: thinkingContent,
-      timestamp: new Date()
+      timestamp: new Date(),
+      metrics
     };
     setConversationHistory(prev => [...prev, assistantMessage]);
   };
@@ -186,6 +196,13 @@ export function CommandInterface() {
 
     let fullResponse = "";
     let fullThinking = "";
+    
+    // Performance tracking variables
+    const startTime = Date.now();
+    let firstTokenTime: number | null = null;
+    let totalTokens = 0;
+    let inputTokens = 0;
+    let outputTokens = 0;
 
     try {
       const config = modelConfigStore.getConfig();
@@ -258,6 +275,10 @@ export function CommandInterface() {
                       
                       // Handle main content
                       if (delta.content) {
+                        // Mark first token time
+                        if (!firstTokenTime && delta.content.trim()) {
+                          firstTokenTime = Date.now();
+                        }
                         fullResponse += delta.content;
                         setResponse(fullResponse);
                       }
@@ -273,9 +294,27 @@ export function CommandInterface() {
           }
         }
         
+        // Calculate metrics for streaming response
+        const endTime = Date.now();
+        const processingTime = endTime - startTime;
+        const timeToFirstToken = firstTokenTime ? firstTokenTime - startTime : 0;
+        const estimatedInputTokens = Math.round(userQuery.length / 4); // Rough estimation
+        const estimatedOutputTokens = Math.round(fullResponse.length / 4); // Rough estimation
+        const estimatedTotalTokens = estimatedInputTokens + estimatedOutputTokens;
+        const tokensPerSecond = processingTime > 0 ? (estimatedOutputTokens / (processingTime / 1000)) : 0;
+        
+        const metrics = {
+          tokensPerSecond: Math.round(tokensPerSecond * 100) / 100,
+          totalTokens: estimatedTotalTokens,
+          inputTokens: estimatedInputTokens,
+          outputTokens: estimatedOutputTokens,
+          timeToFirstToken: timeToFirstToken,
+          processingTime: processingTime
+        };
+
         // Add streaming response to conversation history
         if (fullResponse) {
-          addAssistantResponse(fullResponse, fullThinking);
+          addAssistantResponse(fullResponse, fullThinking, metrics);
         }
       } else {
         // Non-thinking models use regular chat
@@ -288,6 +327,34 @@ export function CommandInterface() {
           
           console.log('Choice message:', choice.message);
           
+          // Calculate metrics for non-streaming response
+          const endTime = Date.now();
+          const processingTime = endTime - startTime;
+          
+          // Extract usage information from API response
+          if (result.usage) {
+            inputTokens = result.usage.prompt_tokens || 0;
+            outputTokens = result.usage.completion_tokens || 0;
+            totalTokens = result.usage.total_tokens || (inputTokens + outputTokens);
+          } else {
+            // Fallback estimation if usage not provided
+            inputTokens = Math.round(userQuery.length / 4);
+            outputTokens = Math.round(choice.message.content.length / 4);
+            totalTokens = inputTokens + outputTokens;
+          }
+          
+          const tokensPerSecond = processingTime > 0 ? (outputTokens / (processingTime / 1000)) : 0;
+          
+          const metrics = {
+            tokensPerSecond: Math.round(tokensPerSecond * 100) / 100,
+            totalTokens: totalTokens,
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            timeToFirstToken: processingTime, // For non-streaming, this is the full time
+            processingTime: processingTime,
+            stopReason: choice.finish_reason || 'completed'
+          };
+          
           // Handle thinking models (like DeepSeek) - fallback for non-streaming
           if (choice.message.reasoning) {
             console.log('Found reasoning:', choice.message.reasoning);
@@ -298,7 +365,7 @@ export function CommandInterface() {
           setResponse(choice.message.content);
           
           // Add assistant response to conversation history
-          addAssistantResponse(choice.message.content, choice.message.reasoning);
+          addAssistantResponse(choice.message.content, choice.message.reasoning, metrics);
         } else {
           const errorMessage = "❌ Erreur: Réponse invalide du modèle";
           setResponse(errorMessage);
@@ -443,6 +510,39 @@ export function CommandInterface() {
                       {message.content}
                     </ReactMarkdown>
                   </div>
+                  
+                  {/* Performance metrics */}
+                  {message.metrics && (
+                    <div className="performance-metrics">
+                      <div className="metrics-row">
+                        {message.metrics.tokensPerSecond && (
+                          <span className="metric metric-speed">
+                            <strong>{message.metrics.tokensPerSecond}</strong> <span className="metric-label">tok/sec</span>
+                          </span>
+                        )}
+                        {(message.metrics.totalTokens || message.metrics.outputTokens) && (
+                          <span className="metric metric-tokens">
+                            <strong>{message.metrics.totalTokens || message.metrics.outputTokens}</strong> <span className="metric-label">tokens</span>
+                            {message.metrics.totalTokens && message.metrics.inputTokens && message.metrics.outputTokens && (
+                              <span style={{ color: 'rgba(255, 255, 255, 0.5)', marginLeft: '4px', fontSize: '10px' }}>
+                                ({message.metrics.inputTokens}+{message.metrics.outputTokens})
+                              </span>
+                            )}
+                          </span>
+                        )}
+                        {message.metrics.timeToFirstToken && (
+                          <span className="metric metric-timing">
+                            <strong>{(message.metrics.timeToFirstToken / 1000).toFixed(2)}s</strong> <span className="metric-label">to first token</span>
+                          </span>
+                        )}
+                        {message.metrics.stopReason && (
+                          <span className="metric metric-stop">
+                            <span className="metric-label">Stop reason:</span> <strong>{message.metrics.stopReason}</strong>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   
                   {/* Action buttons */}
                   <div className="message-actions">

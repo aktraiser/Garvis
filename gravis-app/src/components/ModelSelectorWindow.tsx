@@ -8,6 +8,7 @@ interface ModelSelectorWindowProps {
 
 export const ModelSelectorWindow: React.FC<ModelSelectorWindowProps> = ({ onClose }) => {
   const [availableModels, setAvailableModels] = useState<any[]>([]);
+  const [modelInfoData, setModelInfoData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectedModel, setSelectedModel] = useState(modelConfigStore.currentModel.id);
@@ -30,10 +31,19 @@ export const ModelSelectorWindow: React.FC<ModelSelectorWindowProps> = ({ onClos
       }
 
       const client = new LiteLLMClient(config);
-      const result = await client.getModels();
       
-      if (result.data && Array.isArray(result.data)) {
-        setAvailableModels(result.data);
+      // Récupérer les modèles ET les informations détaillées
+      const [modelsResult, modelInfoResult] = await Promise.all([
+        client.getModels(),
+        client.getModelInfo()
+      ]);
+      
+      console.log('LiteLLM Models Response:', JSON.stringify(modelsResult, null, 2));
+      console.log('LiteLLM Model Info Response:', JSON.stringify(modelInfoResult, null, 2));
+      
+      if (modelsResult.data && Array.isArray(modelsResult.data)) {
+        setAvailableModels(modelsResult.data);
+        setModelInfoData(modelInfoResult);
       } else {
         // Fallback vers les modèles par défaut
         setAvailableModels([]);
@@ -74,6 +84,52 @@ export const ModelSelectorWindow: React.FC<ModelSelectorWindowProps> = ({ onClos
   };
 
   const currentModels = availableModels.length > 0 ? availableModels : AVAILABLE_MODELS;
+
+  const getModelCapabilities = (modelId: string): string[] => {
+    const capabilities: string[] = [];
+    
+    // D'abord vérifier dans les données de l'API LiteLLM
+    if (modelInfoData && modelInfoData.data) {
+      const modelInfo = modelInfoData.data.find((info: any) => info.model_name === modelId);
+      if (modelInfo) {
+        // Vérifier les capacités depuis l'API LiteLLM
+        if (modelInfo.supports_vision) capabilities.push('vision');
+        if (modelInfo.supports_function_calling) capabilities.push('tools');
+        if (modelInfo.supports_parallel_function_calling) capabilities.push('parallel-tools');
+        
+        // Autres capacités possibles depuis model_info
+        if (modelInfo.model_info) {
+          if (modelInfo.model_info.supports_thinking) capabilities.push('thinking');
+          if (modelInfo.model_info.supports_reasoning) capabilities.push('reasoning');
+          if (modelInfo.model_info.supports_code) capabilities.push('code');
+          if (modelInfo.model_info.multimodal) capabilities.push('multimodal');
+        }
+      }
+    }
+    
+    // Fallback vers notre mapping statique si pas d'info de l'API
+    if (capabilities.length === 0) {
+      const localModel = AVAILABLE_MODELS.find(m => m.id === modelId);
+      if (localModel && localModel.capabilities) {
+        capabilities.push(...localModel.capabilities);
+      }
+    }
+    
+    return capabilities;
+  };
+
+  const getCapabilityColor = (capability: string): string => {
+    switch (capability.toLowerCase()) {
+      case 'vision': return '#f59e0b'; // orange
+      case 'tools': return '#3b82f6'; // blue
+      case 'parallel-tools': return '#2563eb'; // blue foncé
+      case 'thinking': return '#8b5cf6'; // purple
+      case 'reasoning': return '#10b981'; // green
+      case 'code': return '#ef4444'; // red
+      case 'multimodal': return '#f97316'; // orange
+      default: return '#6b7280'; // gray
+    }
+  };
 
   console.log('ModelSelectorWindow rendering');
 
@@ -274,7 +330,8 @@ export const ModelSelectorWindow: React.FC<ModelSelectorWindowProps> = ({ onClos
                               gap: '8px',
                               fontWeight: '500', 
                               color: '#ffffff', 
-                              fontSize: '14px' 
+                              fontSize: '14px',
+                              marginBottom: '4px'
                             }}>
                               {model.id}
                               {model.id === modelConfigStore.currentModel.id && (
@@ -291,10 +348,34 @@ export const ModelSelectorWindow: React.FC<ModelSelectorWindowProps> = ({ onClos
                               )}
                             </div>
                             {model.object && (
-                              <div style={{ fontSize: '12px', color: '#9ca3af' }}>
+                              <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>
                                 {model.object}
                               </div>
                             )}
+                            {/* Affichage des capacités - dynamique depuis l'API ou fallback statique */}
+                            {(() => {
+                              const capabilities = getModelCapabilities(model.id);
+                              return capabilities.length > 0 && (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                  {capabilities.map((capability: string) => (
+                                    <span 
+                                      key={capability}
+                                      style={{
+                                        padding: '1px 4px',
+                                        background: getCapabilityColor(capability),
+                                        color: '#ffffff',
+                                        fontSize: '9px',
+                                        borderRadius: '3px',
+                                        fontWeight: '500',
+                                        textTransform: 'lowercase'
+                                      }}
+                                    >
+                                      {capability}
+                                    </span>
+                                  ))}
+                                </div>
+                              );
+                            })()}
                           </div>
                           {selectedModel === model.id && (
                             <CheckCircle size={16} style={{ color: '#a855f7', marginLeft: '8px' }} />

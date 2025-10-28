@@ -1520,3 +1520,63 @@ body {
 .rag-modal-content::-webkit-scrollbar-thumb:hover {
   background: rgba(52, 211, 153, 0.5);
 }
+
+/* Performance Metrics Styles */
+.performance-metrics {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  border-left: 3px solid #3b82f6;
+}
+
+.metrics-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.metric {
+  display: flex;
+  align-items: center;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 400;
+}
+
+.metric strong {
+  color: #ffffff;
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+.metric-label {
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 400;
+}
+
+.metric:not(:last-child)::after {
+  content: '•';
+  margin-left: 12px;
+  color: rgba(255, 255, 255, 0.3);
+  font-weight: bold;
+}
+
+.metric-speed .metric-label {
+  color: #10b981; /* Green for tokens/sec */
+}
+
+.metric-tokens .metric-label {
+  color: #f59e0b; /* Orange for token count */
+}
+
+.metric-timing .metric-label {
+  color: #8b5cf6; /* Purple for timing */
+}
+
+.metric-stop .metric-label {
+  color: #ef4444; /* Red for stop reason */
+}

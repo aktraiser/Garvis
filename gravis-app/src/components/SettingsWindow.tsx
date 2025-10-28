@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Loader2, CheckCircle, XCircle, Wifi } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, Wifi, TestTube, Play, Edit3, Trash2 } from 'lucide-react';
 import { LiteLLMClient, modelConfigStore } from '@/lib/litellm';
 
 interface SettingsWindowProps {
@@ -26,6 +26,7 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = () => {
   ]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newConnection, setNewConnection] = useState({ name: '', baseUrl: '', apiKey: '' });
+  const [editingConnection, setEditingConnection] = useState<Connection | null>(null);
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [testMessage, setTestMessage] = useState('');
   const [testingConnectionId, setTestingConnectionId] = useState<string | null>(null);
@@ -105,6 +106,30 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = () => {
     setConnections(prev => prev.filter(conn => conn.id !== connectionId));
   };
 
+  const handleEditConnection = (connection: Connection) => {
+    setEditingConnection({ ...connection });
+  };
+
+  const handleSaveEdit = () => {
+    if (!editingConnection || !editingConnection.name.trim() || !editingConnection.baseUrl.trim()) return;
+    
+    setConnections(prev => prev.map(conn => 
+      conn.id === editingConnection.id ? editingConnection : conn
+    ));
+    
+    // Si on édite la connexion active, mettre à jour le store
+    if (editingConnection.isActive) {
+      modelConfigStore.setApiKey(editingConnection.apiKey);
+      modelConfigStore.setBaseUrl(editingConnection.baseUrl);
+    }
+    
+    setEditingConnection(null);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingConnection(null);
+  };
+
   const getTestIcon = () => {
     switch (testStatus) {
       case 'testing':
@@ -169,26 +194,36 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = () => {
               gap: '12px'
             }}>
               <Wifi size={24} />
-              Connexions LiteLLM
+              Connexions
             </h2>
             <button 
               onClick={() => setShowAddForm(true)}
+              disabled={!!editingConnection}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
                 padding: '8px 16px',
-                background: '#3b82f6',
+                background: editingConnection ? '#6b7280' : '#3b82f6',
                 color: '#ffffff',
                 border: 'none',
                 borderRadius: '6px',
-                cursor: 'pointer',
+                cursor: editingConnection ? 'not-allowed' : 'pointer',
                 transition: 'background-color 0.2s',
                 fontSize: '14px',
-                fontWeight: '500'
+                fontWeight: '500',
+                opacity: editingConnection ? 0.6 : 1
               }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#2563eb'}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#3b82f6'}
+              onMouseEnter={(e) => {
+                if (!editingConnection) {
+                  e.currentTarget.style.backgroundColor = '#2563eb';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!editingConnection) {
+                  e.currentTarget.style.backgroundColor = '#3b82f6';
+                }
+              }}
             >
               + Ajouter une connexion
             </button>
@@ -250,60 +285,92 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = () => {
                       )}
                     </td>
                     <td style={{ padding: '16px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
                         <button 
                           onClick={() => handleTestConnection(connection)}
                           disabled={testingConnectionId === connection.id}
+                          title="Tester la connexion"
                           style={{
-                            padding: '4px 8px',
+                            padding: '6px',
                             background: '#4b5563',
                             color: '#ffffff',
                             border: 'none',
                             borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontSize: '12px',
-                            transition: 'background-color 0.2s'
+                            cursor: testingConnectionId === connection.id ? 'not-allowed' : 'pointer',
+                            transition: 'background-color 0.2s',
+                            display: 'flex',
+                            alignItems: 'center',
+                            opacity: testingConnectionId === connection.id ? 0.6 : 1
                           }}
-                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#6b7280'}
-                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#4b5563'}
+                          onMouseEnter={(e) => {
+                            if (testingConnectionId !== connection.id) {
+                              e.currentTarget.style.backgroundColor = '#6b7280';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = '#4b5563';
+                          }}
                         >
-                          {testingConnectionId === connection.id ? 'Test...' : 'Tester'}
+                          <TestTube size={14} />
                         </button>
                         {!connection.isActive && (
                           <button 
                             onClick={() => handleActivateConnection(connection.id)}
+                            title="Activer cette connexion"
                             style={{
-                              padding: '4px 8px',
+                              padding: '6px',
                               background: '#16a34a',
                               color: '#ffffff',
                               border: 'none',
                               borderRadius: '4px',
                               cursor: 'pointer',
-                              fontSize: '12px',
-                              transition: 'background-color 0.2s'
+                              transition: 'background-color 0.2s',
+                              display: 'flex',
+                              alignItems: 'center'
                             }}
                             onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#15803d'}
                             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#16a34a'}
                           >
-                            Activer
+                            <Play size={14} />
                           </button>
                         )}
                         <button 
-                          onClick={() => handleDeleteConnection(connection.id)}
+                          onClick={() => handleEditConnection(connection)}
+                          title="Modifier cette connexion"
                           style={{
-                            padding: '4px 8px',
+                            padding: '6px',
+                            background: '#3b82f6',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            transition: 'background-color 0.2s',
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#2563eb'}
+                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#3b82f6'}
+                        >
+                          <Edit3 size={14} />
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteConnection(connection.id)}
+                          title="Supprimer cette connexion"
+                          style={{
+                            padding: '6px',
                             background: '#dc2626',
                             color: '#ffffff',
                             border: 'none',
                             borderRadius: '4px',
                             cursor: 'pointer',
-                            fontSize: '12px',
-                            transition: 'background-color 0.2s'
+                            transition: 'background-color 0.2s',
+                            display: 'flex',
+                            alignItems: 'center'
                           }}
                           onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#b91c1c'}
                           onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#dc2626'}
                         >
-                          Supprimer
+                          <Trash2 size={14} />
                         </button>
                       </div>
                     </td>
@@ -313,8 +380,141 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = () => {
             </table>
           </div>
 
+          {/* Formulaire d'édition */}
+          {editingConnection && (
+            <div style={{
+              marginTop: '24px',
+              background: 'rgba(31, 41, 55, 0.5)',
+              backdropFilter: 'blur(12px)',
+              border: '1px solid #374151',
+              borderRadius: '12px',
+              padding: '24px'
+            }}>
+              <h3 style={{ 
+                fontSize: '18px', 
+                fontWeight: '600', 
+                color: '#ffffff', 
+                margin: '0 0 16px 0' 
+              }}>
+                Modifier la connexion
+              </h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1fr', gap: '16px', marginBottom: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '14px', color: '#d1d5db', marginBottom: '4px' }}>
+                    Nom <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={editingConnection.name}
+                    onChange={(e) => setEditingConnection(prev => prev ? { ...prev, name: e.target.value } : null)}
+                    placeholder="Nom de la connexion..."
+                    style={{
+                      width: '100%',
+                      background: '#374151',
+                      border: `1px solid ${!editingConnection.name.trim() ? '#ef4444' : '#4b5563'}`,
+                      borderRadius: '6px',
+                      padding: '8px',
+                      color: '#ffffff',
+                      fontSize: '14px',
+                      outline: 'none'
+                    }}
+                    onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                    onBlur={(e) => e.target.style.borderColor = !editingConnection.name.trim() ? '#ef4444' : '#4b5563'}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '14px', color: '#d1d5db', marginBottom: '4px' }}>
+                    Base URL <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={editingConnection.baseUrl}
+                    onChange={(e) => setEditingConnection(prev => prev ? { ...prev, baseUrl: e.target.value } : null)}
+                    placeholder="http://localhost:4000"
+                    style={{
+                      width: '100%',
+                      background: '#374151',
+                      border: `1px solid ${!editingConnection.baseUrl.trim() ? '#ef4444' : '#4b5563'}`,
+                      borderRadius: '6px',
+                      padding: '8px',
+                      color: '#ffffff',
+                      fontSize: '14px',
+                      outline: 'none'
+                    }}
+                    onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                    onBlur={(e) => e.target.style.borderColor = !editingConnection.baseUrl.trim() ? '#ef4444' : '#4b5563'}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '14px', color: '#d1d5db', marginBottom: '4px' }}>
+                    API Key
+                  </label>
+                  <input
+                    type="password"
+                    value={editingConnection.apiKey}
+                    onChange={(e) => setEditingConnection(prev => prev ? { ...prev, apiKey: e.target.value } : null)}
+                    placeholder="sk-..."
+                    style={{
+                      width: '100%',
+                      background: '#374151',
+                      border: '1px solid #4b5563',
+                      borderRadius: '6px',
+                      padding: '8px',
+                      color: '#ffffff',
+                      fontSize: '14px',
+                      outline: 'none'
+                    }}
+                  />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button 
+                  onClick={handleSaveEdit}
+                  disabled={!editingConnection.name.trim() || !editingConnection.baseUrl.trim()}
+                  style={{
+                    padding: '8px 16px',
+                    background: (!editingConnection.name.trim() || !editingConnection.baseUrl.trim()) ? '#6b7280' : '#16a34a',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: (!editingConnection.name.trim() || !editingConnection.baseUrl.trim()) ? 'not-allowed' : 'pointer',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    opacity: (!editingConnection.name.trim() || !editingConnection.baseUrl.trim()) ? 0.6 : 1,
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <CheckCircle size={14} />
+                  Sauvegarder
+                </button>
+                <button 
+                  onClick={handleCancelEdit}
+                  style={{
+                    padding: '8px 16px',
+                    background: '#6b7280',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <XCircle size={14} />
+                  Annuler
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Formulaire d'ajout */}
-          {showAddForm && (
+          {showAddForm && !editingConnection && (
             <div style={{
               marginTop: '24px',
               background: 'rgba(31, 41, 55, 0.5)',
@@ -334,28 +534,30 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = () => {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1fr', gap: '16px', marginBottom: '16px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '14px', color: '#d1d5db', marginBottom: '4px' }}>
-                    Nom
+                    Nom <span style={{ color: '#ef4444' }}>*</span>
                   </label>
                   <input
                     type="text"
                     value={newConnection.name}
                     onChange={(e) => setNewConnection(prev => ({ ...prev, name: e.target.value }))}
-                    placeholder="LiteLLM Local"
+                    placeholder="Nom de la connexion..."
                     style={{
                       width: '100%',
                       background: '#374151',
-                      border: '1px solid #4b5563',
+                      border: `1px solid ${!newConnection.name.trim() ? '#ef4444' : '#4b5563'}`,
                       borderRadius: '6px',
                       padding: '8px',
                       color: '#ffffff',
                       fontSize: '14px',
                       outline: 'none'
                     }}
+                    onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                    onBlur={(e) => e.target.style.borderColor = !newConnection.name.trim() ? '#ef4444' : '#4b5563'}
                   />
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '14px', color: '#d1d5db', marginBottom: '4px' }}>
-                    Base URL
+                    Base URL <span style={{ color: '#ef4444' }}>*</span>
                   </label>
                   <input
                     type="text"
@@ -365,13 +567,15 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = () => {
                     style={{
                       width: '100%',
                       background: '#374151',
-                      border: '1px solid #4b5563',
+                      border: `1px solid ${!newConnection.baseUrl.trim() ? '#ef4444' : '#4b5563'}`,
                       borderRadius: '6px',
                       padding: '8px',
                       color: '#ffffff',
                       fontSize: '14px',
                       outline: 'none'
                     }}
+                    onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                    onBlur={(e) => e.target.style.borderColor = !newConnection.baseUrl.trim() ? '#ef4444' : '#4b5563'}
                   />
                 </div>
                 <div>
@@ -399,15 +603,28 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = () => {
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button 
                   onClick={handleAddConnection}
+                  disabled={!newConnection.name.trim() || !newConnection.baseUrl.trim()}
                   style={{
                     padding: '8px 16px',
-                    background: '#16a34a',
+                    background: (!newConnection.name.trim() || !newConnection.baseUrl.trim()) ? '#6b7280' : '#16a34a',
                     color: '#ffffff',
                     border: 'none',
                     borderRadius: '6px',
-                    cursor: 'pointer',
+                    cursor: (!newConnection.name.trim() || !newConnection.baseUrl.trim()) ? 'not-allowed' : 'pointer',
                     fontSize: '14px',
-                    fontWeight: '500'
+                    fontWeight: '500',
+                    opacity: (!newConnection.name.trim() || !newConnection.baseUrl.trim()) ? 0.6 : 1,
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (newConnection.name.trim() && newConnection.baseUrl.trim()) {
+                      e.currentTarget.style.backgroundColor = '#15803d';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (newConnection.name.trim() && newConnection.baseUrl.trim()) {
+                      e.currentTarget.style.backgroundColor = '#16a34a';
+                    }
                   }}
                 >
                   Ajouter

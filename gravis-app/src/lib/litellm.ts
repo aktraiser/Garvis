@@ -5,6 +5,7 @@ export interface LLMModel {
   provider: string;
   description: string;
   contextWindow: number;
+  capabilities?: string[];
   pricing?: {
     input: number;
     output: number;
@@ -27,6 +28,7 @@ export const AVAILABLE_MODELS: LLMModel[] = [
     provider: "OpenAI",
     description: "Latest GPT-4 with vision and improved reasoning",
     contextWindow: 128000,
+    capabilities: ["vision", "tools", "reasoning"],
     pricing: { input: 0.005, output: 0.015 }
   },
   {
@@ -35,6 +37,7 @@ export const AVAILABLE_MODELS: LLMModel[] = [
     provider: "OpenAI", 
     description: "Faster, cheaper GPT-4 variant",
     contextWindow: 128000,
+    capabilities: ["vision", "tools"],
     pricing: { input: 0.0015, output: 0.006 }
   },
   {
@@ -43,6 +46,7 @@ export const AVAILABLE_MODELS: LLMModel[] = [
     provider: "Anthropic",
     description: "Advanced reasoning and code analysis",
     contextWindow: 200000,
+    capabilities: ["tools", "reasoning", "code"],
     pricing: { input: 0.003, output: 0.015 }
   },
   {
@@ -51,6 +55,7 @@ export const AVAILABLE_MODELS: LLMModel[] = [
     provider: "Anthropic",
     description: "Fast and efficient for simple tasks",
     contextWindow: 200000,
+    capabilities: ["tools"],
     pricing: { input: 0.001, output: 0.005 }
   },
   {
@@ -59,6 +64,7 @@ export const AVAILABLE_MODELS: LLMModel[] = [
     provider: "Google",
     description: "Experimental multimodal model",
     contextWindow: 128000,
+    capabilities: ["vision", "tools", "multimodal"],
     pricing: { input: 0.001, output: 0.005 }
   },
   {
@@ -67,6 +73,7 @@ export const AVAILABLE_MODELS: LLMModel[] = [
     provider: "DeepSeek",
     description: "Specialized in code and reasoning",
     contextWindow: 32000,
+    capabilities: ["code", "reasoning"],
     pricing: { input: 0.0007, output: 0.002 }
   },
   {
@@ -75,6 +82,7 @@ export const AVAILABLE_MODELS: LLMModel[] = [
     provider: "DeepSeek",
     description: "Advanced reasoning with visible thinking process",
     contextWindow: 32000,
+    capabilities: ["thinking", "reasoning", "code"],
     pricing: { input: 0.0014, output: 0.008 }
   }
 ];
@@ -161,6 +169,27 @@ export class LiteLLMClient {
     } catch (error) {
       console.error("Failed to fetch models:", error);
       return { data: AVAILABLE_MODELS };
+    }
+  }
+
+  async getModelInfo() {
+    try {
+      const response = await fetch(`${this.baseUrl}/model/info`, {
+        headers: {
+          "Authorization": `Bearer ${this.config.apiKey}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('Model Info API Response:', JSON.stringify(result, null, 2));
+      return result;
+    } catch (error) {
+      console.error("Failed to fetch model info:", error);
+      return null;
     }
   }
 }
