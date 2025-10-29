@@ -1,5 +1,5 @@
 // Window management commands for GRAVIS
-use tauri::{AppHandle, WebviewUrl, WebviewWindowBuilder, Manager};
+use tauri::{AppHandle, WebviewUrl, WebviewWindowBuilder, Manager, Emitter};
 
 #[tauri::command]
 pub async fn open_rag_storage_window(app: AppHandle) -> Result<(), String> {
@@ -104,4 +104,61 @@ pub async fn open_model_selector_window(app: AppHandle) -> Result<(), String> {
             Err(format!("Failed to create Model Selector window: {}", e))
         }
     }
+}
+
+#[tauri::command]
+pub async fn emit_model_changed(app: AppHandle, model: serde_json::Value) -> Result<(), String> {
+    tracing::info!("Emitting model_changed event to all windows: {:?}", model);
+    
+    // Émettre l'événement globalement à toutes les fenêtres
+    app.emit("model_changed", model.clone())
+        .map_err(|e| format!("Failed to emit global model_changed event: {}", e))?;
+    
+    // Émettre aussi spécifiquement à chaque fenêtre connue pour plus de robustesse
+    let known_windows = ["main", "model_selector", "settings", "rag"];
+    for window_label in known_windows.iter() {
+        if let Some(window) = app.get_webview_window(window_label) {
+            let _ = window.emit("model_changed", model.clone());
+            tracing::debug!("Emitted model_changed to window: {}", window_label);
+        }
+    }
+    
+    tracing::info!("Model change event broadcasted successfully");
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn broadcast_to_window(
+    app: AppHandle, 
+    window_label: String, 
+    event: String, 
+    payload: serde_json::Value
+) -> Result<(), String> {
+    tracing::info!("Broadcasting {} to window {}", event, window_label);
+    
+    if let Some(window) = app.get_webview_window(&window_label) {
+        window.emit(&event, payload)
+            .map_err(|e| format!("Failed to emit {} to {}: {}", event, window_label, e))?;
+        tracing::debug!("Successfully broadcasted {} to {}", event, window_label);
+    } else {
+        tracing::warn!("Window {} not found for broadcasting {}", window_label, event);
+        return Err(format!("Window {} not found", window_label));
+    }
+    
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_active_windows(app: AppHandle) -> Result<Vec<String>, String> {
+    let mut active_windows = Vec::new();
+    let known_windows = ["main", "model_selector", "settings", "rag"];
+    
+    for window_label in known_windows.iter() {
+        if app.get_webview_window(window_label).is_some() {
+            active_windows.push(window_label.to_string());
+        }
+    }
+    
+    tracing::info!("Active windows: {:?}", active_windows);
+    Ok(active_windows)
 }

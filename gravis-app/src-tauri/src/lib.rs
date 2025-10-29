@@ -14,7 +14,7 @@ use rag::ocr::commands::{
 use rag::commands::{
     add_document_intelligent, search_with_metadata, get_document_metadata
 };
-use window_commands::{open_rag_storage_window, open_settings_window, open_model_selector_window};
+use window_commands::{open_rag_storage_window, open_settings_window, open_model_selector_window, emit_model_changed, broadcast_to_window, get_active_windows};
 
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -81,6 +81,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             open_rag_storage_window,
             open_settings_window,
             open_model_selector_window,
+            emit_model_changed,
+            broadcast_to_window,
+            get_active_windows,
             // RAG Commands Phase 1
             rag_create_group,
             rag_list_groups,

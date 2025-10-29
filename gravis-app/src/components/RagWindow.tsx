@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Upload, Search, Filter, FileText, Database, Download, Trash2, Eye, PlayCircle } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -26,99 +26,99 @@ interface OcrProcessResponse {
   processing_time_ms: number;
 }
 
+interface DocumentInfo {
+  id: string;
+  name: string;
+  size: string;
+  sizeBytes: number;
+  type: string;
+  status: string;
+  date: string;
+  category: string;
+  pages: number;
+  extracted: boolean;
+  extractedAt: string;
+  confidence: number;
+}
+
 export const RagWindow: React.FC<RagWindowProps> = ({ onClose }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'documents' | 'injection'>('documents');
   const [isExtracting, setIsExtracting] = useState<Record<string, boolean>>({});
   const [isInjecting, setIsInjecting] = useState<Record<string, boolean>>({});
   const [extractionResults, setExtractionResults] = useState<Record<string, any>>({});
+  const [documents, setDocuments] = useState<DocumentInfo[]>([]);
+  const [isLoadingDocuments, setIsLoadingDocuments] = useState(true);
+  // Variables inutilisées mais gardées pour éviter les erreurs
+  const [_isClearing, _setIsClearing] = useState(false);
+  const [_showUploadDialog, _setShowUploadDialog] = useState(false);
+  const [_selectedFile, _setSelectedFile] = useState<File | null>(null);
+  const [_uploadParams, _setUploadParams] = useState({
+    category: 'Mixed',
+    forceOcr: false,
+    language: 'fra+eng'
+  });
 
+  // Charger les documents dynamiquement depuis le dossier exemple
+  const loadDocuments = async () => {
+    setIsLoadingDocuments(true);
+    try {
+      // Créer une commande Tauri pour lister les fichiers du dossier exemple
+      // const documentsPath = '/Users/lucasbometon/Desktop/voice_flow/gravis/gravis-app/exemple';
+      
+      // Pour l'instant, on peut utiliser une approche manuelle
+      // TODO: Créer une commande Tauri list_documents() pour lister automatiquement
+      const exampleFiles = [
+        'unilever-annual-report-and-accounts-2024.pdf',
+        '2510.18234v1.pdf', 
+        'contrôle technique.pdf',
+        'PV_AGE_XME_20octobre2025.pdf',
+        'IMG_20251007_0001.pdf',
+        '7fd558c8d29c99e999e2b6708de21b6b65cbc79de443f9bdd976eb38d8a611f9.png'
+      ];
+      
+      const documentList: DocumentInfo[] = exampleFiles.map((filename, index) => {
+        const isImage = filename.toLowerCase().endsWith('.png') || filename.toLowerCase().endsWith('.jpg');
+        const isPdf = filename.toLowerCase().endsWith('.pdf');
+        
+        // Catégorisation automatique basée sur le nom du fichier
+        let category = 'Mixed';
+        if (filename.includes('unilever') || filename.includes('PV_AGE')) category = 'Business';
+        else if (filename.includes('2510') || filename.includes('research')) category = 'Academic';
+        else if (filename.includes('contrôle') || filename.includes('technique')) category = 'Legal';
+        else if (isImage) category = 'Technical';
+        
+        return {
+          id: (index + 1).toString(),
+          name: filename,
+          size: '? MB', // TODO: Récupérer la vraie taille
+          sizeBytes: 1000000, // Taille par défaut
+          type: isImage ? 'Image' : isPdf ? 'PDF' : 'Unknown',
+          status: 'Ready',
+          date: new Date().toLocaleDateString('fr-FR'),
+          category,
+          pages: isImage ? 1 : 10, // Estimation
+          extracted: false,
+          extractedAt: '',
+          confidence: 0
+        };
+      });
+      
+      setDocuments(documentList);
+    } catch (error) {
+      console.error('Failed to load documents:', error);
+    } finally {
+      setIsLoadingDocuments(false);
+    }
+  };
 
-  // Documents exemple disponibles (basés sur les vrais fichiers)
-  const mockDocuments = [
-    { 
-      id: '1', 
-      name: 'unilever-annual-report-and-accounts-2024.pdf', 
-      size: '8.5 MB', 
-      sizeBytes: 8912345,
-      type: 'PDF', 
-      status: 'Ready', 
-      date: '27/10/2025 18:30', 
-      category: 'Business',
-      pages: 120,
-      extracted: false,
-      extractedAt: '',
-      confidence: 0
-    },
-    { 
-      id: '2', 
-      name: '2510.18234v1.pdf', 
-      size: '2.1 MB', 
-      sizeBytes: 2201728,
-      type: 'PDF', 
-      status: 'Ready', 
-      date: '25/10/2025 14:20', 
-      category: 'Academic',
-      pages: 15,
-      extracted: false,
-      confidence: 0
-    },
-    { 
-      id: '3', 
-      name: 'contrôle technique.pdf', 
-      size: '1.2 MB', 
-      sizeBytes: 1258291,
-      type: 'PDF', 
-      status: 'Ready', 
-      date: '20/10/2025 16:45', 
-      category: 'Legal',
-      pages: 8,
-      extracted: false,
-      extractedAt: '',
-      confidence: 0
-    },
-    { 
-      id: '4', 
-      name: 'PV_AGE_XME_20octobre2025.pdf', 
-      size: '0.8 MB', 
-      sizeBytes: 838860,
-      type: 'PDF', 
-      status: 'Ready', 
-      date: '20/10/2025 12:00', 
-      category: 'Business',
-      pages: 6,
-      extracted: false,
-      confidence: 0
-    },
-    { 
-      id: '5', 
-      name: 'IMG_20251007_0001.pdf', 
-      size: '3.5 MB', 
-      sizeBytes: 3670016,
-      type: 'PDF', 
-      status: 'Ready', 
-      date: '07/10/2025 09:15', 
-      category: 'Mixed',
-      pages: 1,
-      extracted: false,
-      extractedAt: '',
-      confidence: 0
-    },
-    { 
-      id: '6', 
-      name: '7fd558c8d29c99e999e2b6708de21b6b65cbc79de443f9bdd976eb38d8a611f9.png', 
-      size: '0.9 MB', 
-      sizeBytes: 943718,
-      type: 'Image', 
-      status: 'Ready', 
-      date: '15/10/2025 11:30', 
-      category: 'Technical',
-      pages: 1,
-      extracted: false,
-      extractedAt: '',
-      confidence: 0
-    },
-  ];
+  // Charger les documents au montage du composant
+  useEffect(() => {
+    loadDocuments();
+  }, []);
+
+  // Documents affichés (dynamiques)
+  const displayedDocuments = documents;
 
   // Créer un groupe par défaut si nécessaire
   const ensureDefaultGroup = async () => {
@@ -174,21 +174,28 @@ export const RagWindow: React.FC<RagWindowProps> = ({ onClose }) => {
         [docId]: result
       }));
       
-      // Marquer comme extrait dans les mock data (simulation)
-      const docIndex = mockDocuments.findIndex(d => d.id === docId);
-      if (docIndex !== -1) {
-        mockDocuments[docIndex].extracted = true;
-        mockDocuments[docIndex].extractedAt = new Date().toLocaleString();
-        
-        // Calculer la confiance selon le type de résultat
-        if ('confidence_score' in result && result.confidence_score) {
-          mockDocuments[docIndex].confidence = result.confidence_score * 100;
-        } else if ('confidence' in result) {
-          mockDocuments[docIndex].confidence = result.confidence * 100;
-        } else {
-          mockDocuments[docIndex].confidence = 95.0;
-        }
-      }
+      // Marquer comme extrait dans les données dynamiques
+      setDocuments(prevDocs => 
+        prevDocs.map(doc => 
+          doc.id === docId 
+            ? {
+                ...doc,
+                extracted: true,
+                extractedAt: new Date().toLocaleString(),
+                confidence: (() => {
+                  // Calculer la confiance selon le type de résultat
+                  if ('confidence_score' in result && result.confidence_score) {
+                    return result.confidence_score * 100;
+                  } else if ('confidence' in result) {
+                    return result.confidence * 100;
+                  } else {
+                    return 95.0;
+                  }
+                })()
+              }
+            : doc
+        )
+      );
       
     } catch (error) {
       console.error('OCR extraction failed:', error);
@@ -310,8 +317,24 @@ export const RagWindow: React.FC<RagWindowProps> = ({ onClose }) => {
       <div style={{ flex: 1, overflow: 'hidden', padding: '24px' }}>
         {activeTab === 'documents' ? (
           <div>
-            {/* Search bar */}
-            <div style={{ 
+            {/* Loading indicator */}
+            {isLoadingDocuments && (
+              <div style={{
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                height: '200px',
+                color: '#999'
+              }}>
+                Chargement des documents...
+              </div>
+            )}
+            
+            {/* Main content - only show when not loading */}
+            {!isLoadingDocuments && (
+              <>
+                {/* Search bar */}
+                <div style={{ 
               marginBottom: '20px', 
               display: 'flex', 
               gap: '12px', 
@@ -380,8 +403,8 @@ export const RagWindow: React.FC<RagWindowProps> = ({ onClose }) => {
               </div>
 
               {/* Table rows */}
-              {mockDocuments
-                .filter(doc => 
+              {displayedDocuments
+                .filter((doc: DocumentInfo) => 
                   searchQuery === '' || 
                   doc.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                   doc.category.toLowerCase().includes(searchQuery.toLowerCase())
@@ -621,7 +644,7 @@ export const RagWindow: React.FC<RagWindowProps> = ({ onClose }) => {
                   Total Documents
                 </div>
                 <div style={{ fontSize: '24px', fontWeight: '600', color: '#ffffff' }}>
-                  {mockDocuments.length}
+                  {displayedDocuments.length}
                 </div>
               </div>
               <div style={{
@@ -634,7 +657,7 @@ export const RagWindow: React.FC<RagWindowProps> = ({ onClose }) => {
                   Extraits
                 </div>
                 <div style={{ fontSize: '24px', fontWeight: '600', color: '#22c55e' }}>
-                  {mockDocuments.filter(d => d.extracted).length}
+                  {displayedDocuments.filter(d => d.extracted).length}
                 </div>
               </div>
               <div style={{
@@ -647,7 +670,7 @@ export const RagWindow: React.FC<RagWindowProps> = ({ onClose }) => {
                   Taille Totale
                 </div>
                 <div style={{ fontSize: '24px', fontWeight: '600', color: '#ffffff' }}>
-                  {(mockDocuments.reduce((acc, doc) => acc + doc.sizeBytes, 0) / 1024 / 1024).toFixed(1)} MB
+                  {(displayedDocuments.reduce((acc, doc) => acc + doc.sizeBytes, 0) / 1024 / 1024).toFixed(1)} MB
                 </div>
               </div>
               <div style={{
@@ -660,10 +683,15 @@ export const RagWindow: React.FC<RagWindowProps> = ({ onClose }) => {
                   Confiance Moyenne
                 </div>
                 <div style={{ fontSize: '24px', fontWeight: '600', color: '#3b82f6' }}>
-                  {(mockDocuments.filter(d => d.extracted).reduce((acc, doc) => acc + doc.confidence, 0) / mockDocuments.filter(d => d.extracted).length).toFixed(1)}%
+                  {displayedDocuments.filter(d => d.extracted).length > 0 
+                    ? (displayedDocuments.filter(d => d.extracted).reduce((acc, doc) => acc + doc.confidence, 0) / displayedDocuments.filter(d => d.extracted).length).toFixed(1)
+                    : '0.0'
+                  }%
                 </div>
               </div>
             </div>
+              </>
+            )}
           </div>
         ) : (
           <div style={{

@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { Loader2, CheckCircle, XCircle, Wifi, TestTube, Play, Edit3, Trash2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Loader2, CheckCircle, XCircle, Wifi, TestTube, Play, Edit3, Trash2, Scan, Server, Cpu } from 'lucide-react';
 import { LiteLLMClient, modelConfigStore } from '@/lib/litellm';
+import { localModelDetector, LocalModelProvider } from '@/lib/local-models';
 
 interface SettingsWindowProps {
   onClose: () => void;
@@ -12,6 +13,7 @@ interface Connection {
   baseUrl: string;
   apiKey: string;
   isActive: boolean;
+  type?: 'litellm' | 'ollama' | 'localai' | 'ibm' | 'custom';
 }
 
 export const SettingsWindow: React.FC<SettingsWindowProps> = () => {
@@ -21,15 +23,55 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = () => {
       name: 'LiteLLM Local',
       baseUrl: modelConfigStore.baseUrl || 'http://localhost:4000',
       apiKey: modelConfigStore.apiKey || '',
-      isActive: true
+      isActive: true,
+      type: 'litellm'
     }
   ]);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newConnection, setNewConnection] = useState({ name: '', baseUrl: '', apiKey: '' });
+  const [newConnection, setNewConnection] = useState({ name: '', baseUrl: '', apiKey: '', type: 'custom' });
   const [editingConnection, setEditingConnection] = useState<Connection | null>(null);
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [testMessage, setTestMessage] = useState('');
   const [testingConnectionId, setTestingConnectionId] = useState<string | null>(null);
+  
+  // États pour la détection de modèles locaux
+  const [localProviders, setLocalProviders] = useState<LocalModelProvider[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
+  const [showLocalProviders, setShowLocalProviders] = useState(false);
+
+  // Effet pour scanner les modèles locaux au chargement
+  useEffect(() => {
+    scanLocalProviders();
+  }, []);
+
+  // Scanner les fournisseurs locaux
+  const scanLocalProviders = async () => {
+    setIsScanning(true);
+    try {
+      const providers = await localModelDetector.detectAllLocalProviders();
+      setLocalProviders(providers);
+    } catch (error) {
+      console.error('Erreur lors du scan des modèles locaux:', error);
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  // Ajouter un fournisseur local comme connexion
+  const addLocalProviderAsConnection = (provider: LocalModelProvider) => {
+    const connection: Connection = {
+      id: `local-${provider.name.toLowerCase()}-${Date.now()}`,
+      name: provider.name,
+      baseUrl: provider.baseUrl,
+      apiKey: provider.name === 'IBM Watson' ? 'required' : '',
+      isActive: false,
+      type: provider.name.toLowerCase().includes('ollama') ? 'ollama' :
+            provider.name.toLowerCase().includes('localai') ? 'localai' :
+            provider.name.toLowerCase().includes('ibm') ? 'ibm' : 'custom'
+    };
+    
+    setConnections([...connections, connection]);
+  };
 
   const handleAddConnection = () => {
     if (!newConnection.name || !newConnection.baseUrl) return;
@@ -43,20 +85,37 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = () => {
     };
     
     setConnections([...connections, connection]);
-    setNewConnection({ name: '', baseUrl: '', apiKey: '' });
+    setNewConnection({ name: '', baseUrl: '', apiKey: '', type: 'custom' });
     setShowAddForm(false);
   };
 
   const handleActivateConnection = (connectionId: string) => {
-    setConnections(prev => prev.map(conn => ({
-      ...conn,
-      isActive: conn.id === connectionId
-    })));
+    setConnections(prev => {
+      const updated = prev.map(conn => ({
+        ...conn,
+        isActive: conn.id === connectionId ? !conn.isActive : conn.isActive
+      }));
+      
+      // Sauvegarder les connexions actives
+      const activeConns = updated.filter(c => c.isActive).map(c => ({
+        id: c.id,
+        name: c.name,
+        baseUrl: c.baseUrl,
+        apiKey: c.apiKey,
+        type: c.type || 'custom'
+      }));
+      modelConfigStore.setActiveConnections(activeConns);
+      
+      return updated;
+    });
     
     const activeConnection = connections.find(c => c.id === connectionId);
     if (activeConnection) {
-      modelConfigStore.setApiKey(activeConnection.apiKey);
-      modelConfigStore.setBaseUrl(activeConnection.baseUrl);
+      // Pour LiteLLM, mettre à jour la config par défaut
+      if (activeConnection.type === 'litellm' || !activeConnection.type) {
+        modelConfigStore.setApiKey(activeConnection.apiKey);
+        modelConfigStore.setBaseUrl(activeConnection.baseUrl);
+      }
     }
   };
 
@@ -229,6 +288,212 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = () => {
             </button>
           </div>
 
+          {/* Section Modèles Locaux Détectés */}
+          <div style={{
+            background: 'rgba(31, 41, 55, 0.5)',
+            backdropFilter: 'blur(12px)',
+            border: '1px solid #374151',
+            borderRadius: '12px',
+            padding: '20px',
+            marginBottom: '24px'
+          }}>
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'space-between',
+              marginBottom: '16px'
+            }}>
+              <h3 style={{ 
+                fontSize: '18px', 
+                fontWeight: '600', 
+                color: '#ffffff', 
+                margin: 0,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <Cpu size={18} />
+                Modèles Locaux Détectés
+                {localProviders.length > 0 && (
+                  <span style={{
+                    marginLeft: '8px',
+                    padding: '2px 6px',
+                    background: '#16a34a',
+                    color: '#ffffff',
+                    fontSize: '10px',
+                    borderRadius: '4px'
+                  }}>
+                    {localProviders.length}
+                  </span>
+                )}
+              </h3>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button 
+                  onClick={scanLocalProviders}
+                  disabled={isScanning}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '6px 12px',
+                    background: isScanning ? '#6b7280' : '#3b82f6',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: isScanning ? 'not-allowed' : 'pointer',
+                    fontSize: '12px',
+                    fontWeight: '500',
+                    opacity: isScanning ? 0.6 : 1
+                  }}
+                >
+                  <Scan size={12} style={{ animation: isScanning ? 'spin 1s linear infinite' : 'none' }} />
+                  {isScanning ? 'Scan...' : 'Scanner'}
+                </button>
+                <button 
+                  onClick={() => setShowLocalProviders(!showLocalProviders)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '6px 12px',
+                    background: '#4b5563',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    fontWeight: '500'
+                  }}
+                >
+                  <Server size={12} />
+                  {showLocalProviders ? 'Masquer' : 'Afficher'}
+                </button>
+              </div>
+            </div>
+
+            {/* Liste des fournisseurs locaux */}
+            {showLocalProviders && (
+              <div style={{ 
+                display: 'grid', 
+                gap: '12px',
+                marginTop: '16px'
+              }}>
+                {localProviders.length === 0 ? (
+                  <div style={{
+                    padding: '20px',
+                    textAlign: 'center',
+                    color: '#9ca3af',
+                    fontSize: '14px',
+                    background: 'rgba(75, 85, 99, 0.2)',
+                    borderRadius: '8px',
+                    border: '1px dashed #4b5563'
+                  }}>
+                    {isScanning ? 'Scan en cours...' : 'Aucun fournisseur local détecté. Assurez-vous qu\'Ollama ou d\'autres services sont en cours d\'exécution.'}
+                  </div>
+                ) : (
+                  localProviders.map((provider, index) => (
+                    <div key={index} style={{
+                      padding: '16px',
+                      background: 'rgba(75, 85, 99, 0.3)',
+                      borderRadius: '8px',
+                      border: `1px solid ${provider.isAvailable ? '#16a34a' : '#ef4444'}`
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: '8px',
+                            marginBottom: '4px'
+                          }}>
+                            <h4 style={{ 
+                              fontSize: '14px', 
+                              fontWeight: '600', 
+                              color: '#ffffff', 
+                              margin: 0 
+                            }}>
+                              {provider.name}
+                            </h4>
+                            <span style={{
+                              padding: '2px 6px',
+                              background: provider.isAvailable ? '#16a34a' : '#ef4444',
+                              color: '#ffffff',
+                              fontSize: '10px',
+                              borderRadius: '4px'
+                            }}>
+                              {provider.isAvailable ? 'Disponible' : 'Hors ligne'}
+                            </span>
+                            {provider.models.length > 0 && (
+                              <span style={{
+                                padding: '2px 6px',
+                                background: '#3b82f6',
+                                color: '#ffffff',
+                                fontSize: '10px',
+                                borderRadius: '4px'
+                              }}>
+                                {provider.models.length} modèle(s)
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#9ca3af' }}>
+                            {provider.baseUrl}
+                          </div>
+                          {provider.models.length > 0 && (
+                            <div style={{ 
+                              marginTop: '8px',
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: '4px'
+                            }}>
+                              {provider.models.slice(0, 3).map((model, modelIndex) => (
+                                <span key={modelIndex} style={{
+                                  padding: '2px 6px',
+                                  background: 'rgba(139, 92, 246, 0.2)',
+                                  color: '#c4b5fd',
+                                  fontSize: '10px',
+                                  borderRadius: '4px',
+                                  border: '1px solid #8b5cf6'
+                                }}>
+                                  {model.name}
+                                </span>
+                              ))}
+                              {provider.models.length > 3 && (
+                                <span style={{
+                                  padding: '2px 6px',
+                                  color: '#9ca3af',
+                                  fontSize: '10px'
+                                }}>
+                                  +{provider.models.length - 3} autres
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <button 
+                          onClick={() => addLocalProviderAsConnection(provider)}
+                          disabled={connections.some(c => c.baseUrl === provider.baseUrl)}
+                          style={{
+                            padding: '6px 12px',
+                            background: connections.some(c => c.baseUrl === provider.baseUrl) ? '#6b7280' : '#16a34a',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: connections.some(c => c.baseUrl === provider.baseUrl) ? 'not-allowed' : 'pointer',
+                            fontSize: '12px',
+                            fontWeight: '500',
+                            opacity: connections.some(c => c.baseUrl === provider.baseUrl) ? 0.6 : 1
+                          }}
+                        >
+                          {connections.some(c => c.baseUrl === provider.baseUrl) ? 'Ajouté' : 'Ajouter'}
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Tableau des connexions */}
           <div style={{
             background: 'rgba(31, 41, 55, 0.5)',
@@ -313,27 +578,29 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = () => {
                         >
                           <TestTube size={14} />
                         </button>
-                        {!connection.isActive && (
-                          <button 
-                            onClick={() => handleActivateConnection(connection.id)}
-                            title="Activer cette connexion"
-                            style={{
-                              padding: '6px',
-                              background: '#16a34a',
-                              color: '#ffffff',
-                              border: 'none',
-                              borderRadius: '4px',
-                              cursor: 'pointer',
-                              transition: 'background-color 0.2s',
-                              display: 'flex',
-                              alignItems: 'center'
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#15803d'}
-                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#16a34a'}
-                          >
-                            <Play size={14} />
-                          </button>
-                        )}
+                        <button 
+                          onClick={() => handleActivateConnection(connection.id)}
+                          title={connection.isActive ? "Désactiver cette connexion" : "Activer cette connexion"}
+                          style={{
+                            padding: '6px',
+                            background: connection.isActive ? '#ef4444' : '#16a34a',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            transition: 'background-color 0.2s',
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = connection.isActive ? '#dc2626' : '#15803d';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = connection.isActive ? '#ef4444' : '#16a34a';
+                          }}
+                        >
+                          <Play size={14} />
+                        </button>
                         <button 
                           onClick={() => handleEditConnection(connection)}
                           title="Modifier cette connexion"
@@ -531,6 +798,101 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = () => {
               }}>
                 Nouvelle connexion
               </h3>
+
+              {/* Connexions prédéfinies */}
+              <div style={{ marginBottom: '20px' }}>
+                <h4 style={{ 
+                  fontSize: '14px', 
+                  fontWeight: '600', 
+                  color: '#d1d5db', 
+                  margin: '0 0 8px 0' 
+                }}>
+                  Connexions rapides
+                </h4>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px' }}>
+                  <button 
+                    onClick={() => setNewConnection({
+                      name: 'IBM Watson Assistant',
+                      baseUrl: 'https://api.us-south.assistant.watson.cloud.ibm.com',
+                      apiKey: '',
+                      type: 'ibm'
+                    })}
+                    style={{
+                      padding: '8px 12px',
+                      background: 'rgba(59, 130, 246, 0.2)',
+                      color: '#93c5fd',
+                      border: '1px solid #3b82f6',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      textAlign: 'left'
+                    }}
+                  >
+                    🔵 IBM Watson Assistant
+                  </button>
+                  <button 
+                    onClick={() => setNewConnection({
+                      name: 'IBM Watson Discovery',
+                      baseUrl: 'https://api.us-south.discovery.watson.cloud.ibm.com',
+                      apiKey: '',
+                      type: 'ibm'
+                    })}
+                    style={{
+                      padding: '8px 12px',
+                      background: 'rgba(59, 130, 246, 0.2)',
+                      color: '#93c5fd',
+                      border: '1px solid #3b82f6',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      textAlign: 'left'
+                    }}
+                  >
+                    🔍 IBM Watson Discovery
+                  </button>
+                  <button 
+                    onClick={() => setNewConnection({
+                      name: 'Ollama Local',
+                      baseUrl: 'http://localhost:11434',
+                      apiKey: '',
+                      type: 'ollama'
+                    })}
+                    style={{
+                      padding: '8px 12px',
+                      background: 'rgba(16, 163, 74, 0.2)',
+                      color: '#86efac',
+                      border: '1px solid #16a34a',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      textAlign: 'left'
+                    }}
+                  >
+                    🦙 Ollama Local
+                  </button>
+                  <button 
+                    onClick={() => setNewConnection({
+                      name: 'LocalAI',
+                      baseUrl: 'http://localhost:8080',
+                      apiKey: '',
+                      type: 'localai'
+                    })}
+                    style={{
+                      padding: '8px 12px',
+                      background: 'rgba(16, 163, 74, 0.2)',
+                      color: '#86efac',
+                      border: '1px solid #16a34a',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      textAlign: 'left'
+                    }}
+                  >
+                    🤖 LocalAI
+                  </button>
+                </div>
+              </div>
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1fr', gap: '16px', marginBottom: '16px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '14px', color: '#d1d5db', marginBottom: '4px' }}>

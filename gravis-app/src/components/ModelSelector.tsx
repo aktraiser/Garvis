@@ -12,6 +12,25 @@ export function ModelSelector({ onModelChange, compact = false }: ModelSelectorP
   const [selectedModel, setSelectedModel] = useState<LLMModel>(modelConfigStore.currentModel);
   const [showSettings, setShowSettings] = useState(false);
 
+  // Écouter les changements du modèle dans le store
+  useEffect(() => {
+    const checkModelUpdate = () => {
+      if (modelConfigStore.currentModel.id !== selectedModel.id) {
+        console.log('ModelSelector: Model changed externally', {
+          old: selectedModel.id,
+          new: modelConfigStore.currentModel.id
+        });
+        setSelectedModel(modelConfigStore.currentModel);
+        onModelChange?.(modelConfigStore.currentModel);
+      }
+    };
+
+    // Vérifier périodiquement si le modèle a changé
+    const interval = setInterval(checkModelUpdate, 1000);
+    
+    return () => clearInterval(interval);
+  }, [selectedModel.id, onModelChange]);
+
   const handleModelSelect = (model: LLMModel) => {
     setSelectedModel(model);
     modelConfigStore.setModel(model);

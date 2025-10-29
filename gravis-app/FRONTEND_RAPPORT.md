@@ -1,10 +1,11 @@
 # GRAVIS - Rapport Frontend 
 ## Interface Utilisateur & Architecture React
 
-📅 **Date**: 28 Octobre 2024  
+📅 **Date**: 29 Octobre 2024  
 🏗️ **Version**: 0.1.0  
 ⚛️ **Framework**: React 19.1.0 + TypeScript  
-🖥️ **Runtime**: Tauri v2 + Vite 7.1.12
+🖥️ **Runtime**: Tauri v2 + Vite 7.1.12  
+🚀 **Statut**: ✅ Communication inter-fenêtres résolue en production
 
 ---
 
@@ -26,6 +27,10 @@ src/
 │   ├── SettingsPage.tsx        # Page Settings routing
 │   └── ModelSelectorPage.tsx   # Page Model Selector routing
 ├── lib/                 # Utilitaires et configurations
+│   ├── litellm.ts              # Client LiteLLM et gestion modèles
+│   ├── tauri-model-store.ts    # 🆕 Communication inter-fenêtres Tauri
+│   ├── unified-model-client.ts # Client unifié modèles (Ollama + LiteLLM)
+│   └── broadcast-store.ts      # Store BroadcastChannel (fallback)
 ├── stores/              # Gestion d'état (stores)
 └── App.tsx              # Point d'entrée principal
 ```
@@ -145,7 +150,7 @@ interface Connection {
 - **Test de connectivité**: Validation en temps réel
 - **Persistance**: Synchronisation avec modelConfigStore
 
-### 4. **ModelSelectorWindow.tsx** - Sélection de Modèles IA
+### 4. **ModelSelectorWindow.tsx** - Sélection de Modèles IA ✅ RÉSOLU
 **Localisation**: `src/components/ModelSelectorWindow.tsx`
 
 #### 🤖 Interface de Sélection
@@ -155,11 +160,32 @@ const [selectedModel, setSelectedModel] = useState(modelConfigStore.currentModel
 ```
 
 #### ⚙️ Fonctionnalités Clés
-- **Chargement dynamique**: Récupération modèles depuis serveur LiteLLM
+- **✅ Communication Tauri**: Utilise `TauriModelStore` pour événements natifs
+- **✅ Routage API intelligent**: Ollama local vs LiteLLM distant automatique
+- **✅ Fonctionnement en production**: Résolu avec événements Tauri
 - **Badge "utilisé"**: Identification modèle actuel
-- **Fallback local**: Modèles par défaut si serveur indisponible
+- **Fallback robuste**: localStorage + polling si événements échouent
 - **Interface épurée**: Layout simplifié sans headers encombrants
 - **Actualisation**: Bouton refresh intégré dans la liste
+
+#### 🔄 Communication Inter-Fenêtres (NOUVEAU)
+```typescript
+// Système d'événements Tauri natifs
+import { tauriModelStore } from '@/lib/tauri-model-store';
+
+const handleSave = async () => {
+  try {
+    // Broadcaster via événements Tauri natifs
+    await tauriModelStore.emitModelChanged(foundModel);
+    
+    // Fallback localStorage si nécessaire
+    await tauriModelStore.emitToWindow('main', foundModel);
+  } catch (error) {
+    // Fallback localStorage + polling
+    modelConfigStore.setModel(foundModel);
+  }
+};
+```
 
 ### 5. **Pages de Routage** - Navigation Multi-Fenêtres
 **Localisation**: `src/pages/`
@@ -176,6 +202,129 @@ if (pathname === '/models' || hash === '#models') {
   return <ModelSelectorPage />;
 }
 ```
+
+---
+
+## 🔄 Système de Communication Inter-Fenêtres (NOUVEAU)
+
+### 🎯 Problème Résolu
+**Enjeu**: La sélection de modèle fonctionnait en développement mais pas en production buildée.
+
+**Cause**: Les fenêtres Tauri ont des contextes de sécurité isolés en production, empêchant BroadcastChannel et événements localStorage de fonctionner.
+
+### 🚀 Solution Implémentée: TauriModelStore
+
+#### 📁 Architecture
+```typescript
+// src/lib/tauri-model-store.ts
+export class TauriModelStore {
+  // 1. Événements Tauri natifs (priorité)
+  async emitModelChanged(model: LLMModel) {
+    await invoke('emit_model_changed', { model });
+  }
+  
+  // 2. Communication ciblée fenêtre
+  async emitToWindow(windowLabel: string, model: LLMModel) {
+    await invoke('broadcast_to_window', { windowLabel, event: 'model_changed', payload: model });
+  }
+  
+  // 3. Écoute événements inter-fenêtres
+  onModelChanged(callback: (model: LLMModel) => void) {
+    return listen<LLMModel>('model_changed', (event) => {
+      callback(event.payload);
+    });
+  }
+}
+```
+
+#### 🦀 Commandes Rust Backend
+```rust
+// src-tauri/src/window_commands.rs
+#[tauri::command]
+pub async fn emit_model_changed(app: AppHandle, model: serde_json::Value) -> Result<(), String> {
+    // Broadcast global à toutes les fenêtres
+    app.emit("model_changed", model.clone())?;
+    
+    // Broadcast spécifique aux fenêtres connues
+    let known_windows = ["main", "model_selector", "settings", "rag"];
+    for window_label in known_windows.iter() {
+        if let Some(window) = app.get_webview_window(window_label) {
+            let _ = window.emit("model_changed", model.clone());
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn broadcast_to_window(
+    app: AppHandle, 
+    window_label: String, 
+    event: String, 
+    payload: serde_json::Value
+) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(&window_label) {
+        window.emit(&event, payload)?;
+    }
+    Ok(())
+}
+```
+
+#### 🛡️ Permissions Tauri
+```json
+// src-tauri/capabilities/default.json
+{
+  "permissions": [
+    "core:event:allow-emit",
+    "core:event:allow-listen", 
+    "core:event:allow-unlisten"
+  ]
+}
+```
+
+### 🔄 Système de Fallback en Cascade
+
+#### 📊 Priorités de Communication
+1. **🥇 Événements Tauri natifs** - Solution principale production
+2. **🥈 localStorage + événements** - Fallback développement
+3. **🥉 Polling automatique** - Backup de sécurité (500ms)
+
+#### 💻 Intégration CommandInterface
+```typescript
+// src/components/CommandInterface.tsx
+useEffect(() => {
+  // 1. Écouter événements Tauri (priorité)
+  const unsubscribeTauri = tauriModelStore.onModelChanged((model) => {
+    console.log('🎯 Received model change from Tauri events:', model);
+    setCurrentModel(model);
+  });
+  
+  // 2. Fallback localStorage
+  window.addEventListener('storage', updateModelFromStorage);
+  
+  // 3. Polling backup (500ms)
+  const pollInterval = setInterval(() => {
+    const storeModel = modelConfigStore.currentModel;
+    if (storeModel.id !== currentModel.id) {
+      setCurrentModel(storeModel);
+    }
+  }, 500);
+  
+  return () => {
+    unsubscribeTauri();
+    window.removeEventListener('storage', updateModelFromStorage);
+    clearInterval(pollInterval);
+  };
+}, []);
+```
+
+### ✅ Résultats
+
+| Environnement | BroadcastChannel | localStorage | Tauri Events | Status |
+|---------------|------------------|--------------|--------------|---------|
+| **Développement** | ✅ Fonctionne | ✅ Fonctionne | ✅ Fonctionne | ✅ OK |
+| **Production Build** | ❌ Bloqué | ⚠️ Limité | ✅ Fonctionne | ✅ OK |
+
+**🏆 Succès**: La sélection de modèle fonctionne maintenant parfaitement en développement ET en production !
 
 ---
 
@@ -258,6 +407,9 @@ await invoke('ocr_process_image', { imagePath: path });
 | `open_rag_storage_window` | Window | Créer nouvelle fenêtre RAG |
 | `open_settings_window` | Window | Créer fenêtre de paramètres |
 | `open_model_selector_window` | Window | Créer fenêtre sélection modèles |
+| `emit_model_changed` | 🆕 Communication | Broadcaster changement modèle à toutes fenêtres |
+| `broadcast_to_window` | 🆕 Communication | Envoyer événement à fenêtre spécifique |
+| `get_active_windows` | 🆕 Diagnostic | Lister fenêtres actives |
 | `rag_create_group` | RAG | Créer groupe de documents |
 | `rag_list_groups` | RAG | Lister groupes existants |
 | `add_document_intelligent` | RAG | Ajouter document avec IA |
@@ -281,6 +433,7 @@ await invoke('ocr_process_image', { imagePath: path });
 ### 🔐 Permissions
 - **Création de fenêtres**: `core:webview:allow-create-webview-window`
 - **Gestion fenêtres**: Position, taille, fermeture
+- **🆕 Événements Tauri**: `core:event:allow-emit`, `core:event:allow-listen`, `core:event:allow-unlisten`
 - **Accès fichiers**: Lecture/écriture contrôlée
 
 ---

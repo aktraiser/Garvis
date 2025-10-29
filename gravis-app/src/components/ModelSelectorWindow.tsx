@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Loader2, CheckCircle, XCircle, Bot, RefreshCw } from 'lucide-react';
-import { LiteLLMClient, modelConfigStore, AVAILABLE_MODELS } from '@/lib/litellm';
+import { modelConfigStore, AVAILABLE_MODELS } from '@/lib/litellm';
+import { unifiedModelClient } from '@/lib/unified-model-client';
+import { tauriModelStore } from '@/lib/tauri-model-store';
 
 interface ModelSelectorWindowProps {
   onClose: () => void;
@@ -8,7 +10,8 @@ interface ModelSelectorWindowProps {
 
 export const ModelSelectorWindow: React.FC<ModelSelectorWindowProps> = ({ onClose }) => {
   const [availableModels, setAvailableModels] = useState<any[]>([]);
-  const [modelInfoData, setModelInfoData] = useState<any>(null);
+  const [modelInfoData] = useState<any>(null);
+  const [modelSources, setModelSources] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectedModel, setSelectedModel] = useState(modelConfigStore.currentModel.id);
@@ -22,37 +25,27 @@ export const ModelSelectorWindow: React.FC<ModelSelectorWindowProps> = ({ onClos
     setError('');
 
     try {
-      const config = modelConfigStore.getConfig();
+      // Utiliser le client unifié pour récupérer tous les modèles
+      const unifiedResponse = await unifiedModelClient.getAllAvailableModels();
       
-      if (!config.apiKey && !config.baseUrl) {
-        setError('Configuration manquante : veuillez d\'abord configurer votre API');
-        setAvailableModels([]);
-        return;
-      }
-
-      const client = new LiteLLMClient(config);
       
-      // Récupérer les modèles ET les informations détaillées
-      const [modelsResult, modelInfoResult] = await Promise.all([
-        client.getModels(),
-        client.getModelInfo()
-      ]);
+      setAvailableModels(unifiedResponse.models);
+      setModelSources(unifiedResponse.sources);
       
-      console.log('LiteLLM Models Response:', JSON.stringify(modelsResult, null, 2));
-      console.log('LiteLLM Model Info Response:', JSON.stringify(modelInfoResult, null, 2));
-      
-      if (modelsResult.data && Array.isArray(modelsResult.data)) {
-        setAvailableModels(modelsResult.data);
-        setModelInfoData(modelInfoResult);
-      } else {
-        // Fallback vers les modèles par défaut
-        setAvailableModels([]);
-        setError('Impossible de récupérer les modèles du serveur');
+      if (unifiedResponse.models.length === 0) {
+        setError('Aucun modèle disponible. Vérifiez vos connexions dans les paramètres.');
       }
     } catch (err) {
       console.error('Error loading models:', err);
       setError(err instanceof Error ? err.message : 'Erreur de connexion');
-      setAvailableModels([]);
+      setAvailableModels(AVAILABLE_MODELS); // Fallback
+      setModelSources([{
+        name: 'Modèles par défaut',
+        type: 'default',
+        baseUrl: 'built-in',
+        modelCount: AVAILABLE_MODELS.length,
+        isAvailable: true
+      }]);
     } finally {
       setIsLoading(false);
     }
@@ -62,13 +55,23 @@ export const ModelSelectorWindow: React.FC<ModelSelectorWindowProps> = ({ onClos
     setSelectedModel(modelId);
   };
 
-  const handleSave = () => {
-    // Chercher le modèle d'abord dans les modèles du serveur, puis dans notre liste locale
-    let foundModel = availableModels.find(m => m.id === selectedModel) || 
-                     AVAILABLE_MODELS.find(m => m.id === selectedModel) ||
-                     modelConfigStore.currentModel;
+  const handleSave = async () => {
+    if (!selectedModel) {
+      return;
+    }
     
-    // Si le modèle du serveur n'a pas de 'name', utiliser l'id
+    // Chercher le modèle sélectionné
+    let foundModel = availableModels.find(m => m.id === selectedModel);
+    
+    if (!foundModel) {
+      foundModel = AVAILABLE_MODELS.find(m => m.id === selectedModel);
+    }
+    
+    if (!foundModel) {
+      foundModel = modelConfigStore.currentModel;
+    }
+    
+    // Assurer que le modèle a un nom
     if (foundModel && !foundModel.name) {
       foundModel = {
         ...foundModel,
@@ -76,14 +79,43 @@ export const ModelSelectorWindow: React.FC<ModelSelectorWindowProps> = ({ onClos
       };
     }
     
-    console.log('Saving model:', foundModel);
-    modelConfigStore.setModel(foundModel);
+    try {
+      // Utiliser le système d'événements Tauri au lieu de localStorage
+      await tauriModelStore.emitModelChanged(foundModel);
+      
+      // Optionnel : broadcaster spécifiquement à la fenêtre principale
+      try {
+        await tauriModelStore.emitToWindow('main', foundModel);
+      } catch (error) {
+        // Ignore les erreurs si la fenêtre principale n'existe pas
+      }
+      
+    } catch (error) {
+      // Fallback vers localStorage en cas d'échec
+      try {
+        modelConfigStore.setModel(foundModel);
+        
+        const storageEvent = new StorageEvent('storage', {
+          key: 'gravis-config',
+          newValue: localStorage.getItem('gravis-config'),
+          oldValue: null,
+          storageArea: localStorage,
+          url: window.location.href
+        });
+        
+        window.dispatchEvent(storageEvent);
+      } catch (fallbackError) {
+        return;
+      }
+    }
     
-    // Close window after save
-    setTimeout(() => onClose(), 500);
+    // Fermer la fenêtre après une courte pause
+    setTimeout(() => {
+      onClose();
+    }, 300);
   };
 
-  const currentModels = availableModels.length > 0 ? availableModels : AVAILABLE_MODELS;
+  const currentModels = availableModels;
 
   const getModelCapabilities = (modelId: string): string[] => {
     const capabilities: string[] = [];
@@ -131,7 +163,6 @@ export const ModelSelectorWindow: React.FC<ModelSelectorWindowProps> = ({ onClos
     }
   };
 
-  console.log('ModelSelectorWindow rendering');
 
   return (
     <div style={{ 
@@ -310,7 +341,11 @@ export const ModelSelectorWindow: React.FC<ModelSelectorWindowProps> = ({ onClos
                           transition: 'all 0.2s',
                           cursor: 'pointer'
                         }}
-                        onClick={() => handleModelSelect(model.id)}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleModelSelect(model.id);
+                        }}
                         onMouseEnter={(e) => {
                           if (selectedModel !== model.id) {
                             e.currentTarget.style.borderColor = '#6b7280';
@@ -334,6 +369,18 @@ export const ModelSelectorWindow: React.FC<ModelSelectorWindowProps> = ({ onClos
                               marginBottom: '4px'
                             }}>
                               {model.id}
+                              {selectedModel === model.id && (
+                                <span style={{
+                                  padding: '2px 6px',
+                                  background: '#8b5cf6',
+                                  color: '#ffffff',
+                                  fontSize: '10px',
+                                  borderRadius: '4px',
+                                  fontWeight: '500'
+                                }}>
+                                  sélectionné
+                                </span>
+                              )}
                               {model.id === modelConfigStore.currentModel.id && (
                                 <span style={{
                                   padding: '2px 6px',
@@ -390,11 +437,70 @@ export const ModelSelectorWindow: React.FC<ModelSelectorWindowProps> = ({ onClos
               {/* Right Panel - Selection Info & Actions */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
 
+                {/* Sources Info */}
+                {modelSources.length > 0 && (
+                  <div style={{
+                    background: 'rgba(31, 41, 55, 0.5)',
+                    backdropFilter: 'blur(12px)',
+                    border: '1px solid #374151',
+                    borderRadius: '12px',
+                    padding: '16px'
+                  }}>
+                    <h3 style={{ 
+                      fontSize: '16px', 
+                      fontWeight: '600', 
+                      color: '#ffffff', 
+                      margin: '0 0 12px 0' 
+                    }}>
+                      Sources Actives
+                    </h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {modelSources.map((source, index) => (
+                        <div key={index} style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '8px 12px',
+                          background: 'rgba(75, 85, 99, 0.3)',
+                          borderRadius: '6px',
+                          border: `1px solid ${source.isAvailable ? '#16a34a' : '#ef4444'}`
+                        }}>
+                          <div>
+                            <div style={{ 
+                              fontSize: '12px', 
+                              fontWeight: '500', 
+                              color: '#ffffff',
+                              marginBottom: '2px'
+                            }}>
+                              {source.name}
+                            </div>
+                            <div style={{ fontSize: '10px', color: '#9ca3af' }}>
+                              {source.type} • {source.modelCount} modèles
+                            </div>
+                          </div>
+                          <div style={{
+                            padding: '2px 6px',
+                            background: source.isAvailable ? '#16a34a' : '#ef4444',
+                            color: '#ffffff',
+                            fontSize: '9px',
+                            borderRadius: '4px'
+                          }}>
+                            {source.isAvailable ? 'OK' : 'OFF'}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Action Button */}
                 <button 
-                  onClick={handleSave} 
-                  disabled={!selectedModel || selectedModel === modelConfigStore.currentModel.id}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleSave();
+                  }} 
+                  disabled={!selectedModel}
                   style={{
                     width: '100%',
                     display: 'flex',
@@ -402,27 +508,41 @@ export const ModelSelectorWindow: React.FC<ModelSelectorWindowProps> = ({ onClos
                     justifyContent: 'center',
                     gap: '8px',
                     padding: '12px 16px',
-                    background: '#8b5cf6',
+                    background: !selectedModel ? '#6b7280' : (selectedModel === modelConfigStore.currentModel.id ? '#16a34a' : '#8b5cf6'),
                     color: '#ffffff',
                     border: 'none',
                     borderRadius: '8px',
                     fontWeight: '500',
-                    cursor: (!selectedModel || selectedModel === modelConfigStore.currentModel.id) ? 'not-allowed' : 'pointer',
+                    cursor: !selectedModel ? 'not-allowed' : 'pointer',
                     transition: 'background-color 0.2s',
-                    opacity: (!selectedModel || selectedModel === modelConfigStore.currentModel.id) ? 0.5 : 1
+                    opacity: !selectedModel ? 0.5 : 1
                   }}
                   onMouseEnter={(e) => {
-                    if (selectedModel && selectedModel !== modelConfigStore.currentModel.id) {
-                      e.currentTarget.style.backgroundColor = '#7c3aed';
+                    if (selectedModel) {
+                      if (selectedModel === modelConfigStore.currentModel.id) {
+                        e.currentTarget.style.backgroundColor = '#15803d';
+                      } else {
+                        e.currentTarget.style.backgroundColor = '#7c3aed';
+                      }
                     }
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '#8b5cf6';
+                    if (selectedModel) {
+                      if (selectedModel === modelConfigStore.currentModel.id) {
+                        e.currentTarget.style.backgroundColor = '#16a34a';
+                      } else {
+                        e.currentTarget.style.backgroundColor = '#8b5cf6';
+                      }
+                    } else {
+                      e.currentTarget.style.backgroundColor = '#6b7280';
+                    }
                   }}
                 >
                   <CheckCircle size={16} />
                   <span>
-                    {selectedModel === modelConfigStore.currentModel.id ? 'Modèle Actuel' : 'Appliquer la Sélection'}
+                    {!selectedModel ? 'Aucun modèle sélectionné' : 
+                     selectedModel === modelConfigStore.currentModel.id ? 'Modèle Actuel - Confirmer' : 
+                     'Appliquer la Sélection'}
                   </span>
                 </button>
               </div>

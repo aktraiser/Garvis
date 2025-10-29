@@ -97,16 +97,45 @@ export class LiteLLMClient {
     this.baseUrl = config.baseUrl || "http://localhost:4000";
   }
 
+  private getEndpointForModel(): { baseUrl: string; apiKey: string; modelName: string } {
+    const currentModel = modelConfigStore.currentModel;
+    
+    // Pour les modèles Ollama, router vers localhost:11434
+    if (currentModel.provider === 'Ollama' || currentModel.id.startsWith('ollama/')) {
+      return {
+        baseUrl: 'http://localhost:11434',
+        apiKey: '', // Ollama n'a pas besoin de clé API
+        modelName: currentModel.name || currentModel.id.replace('ollama/', '')
+      };
+    }
+    
+    // Pour les autres modèles, utiliser la configuration LiteLLM
+    return {
+      baseUrl: this.baseUrl,
+      apiKey: this.config.apiKey,
+      modelName: currentModel.id.startsWith('litellm/') ? 
+        currentModel.id.replace('litellm/', '') : 
+        currentModel.id
+    };
+  }
+
   async chat(messages: Array<{ role: string; content: string }>) {
     try {
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+      const endpoint = this.getEndpointForModel();
+      const headers: { [key: string]: string } = {
+        "Content-Type": "application/json",
+      };
+      
+      // Ajouter l'autorisation seulement si une clé API est fournie
+      if (endpoint.apiKey) {
+        headers["Authorization"] = `Bearer ${endpoint.apiKey}`;
+      }
+      
+      const response = await fetch(`${endpoint.baseUrl}/chat/completions`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${this.config.apiKey}`,
-        },
+        headers,
         body: JSON.stringify({
-          model: this.config.model,
+          model: endpoint.modelName,
           messages,
           temperature: this.config.temperature || 0.7,
           max_tokens: this.config.maxTokens || 2000,
@@ -127,14 +156,21 @@ export class LiteLLMClient {
 
   async chatStream(messages: Array<{ role: string; content: string }>) {
     try {
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+      const endpoint = this.getEndpointForModel();
+      const headers: { [key: string]: string } = {
+        "Content-Type": "application/json",
+      };
+      
+      // Ajouter l'autorisation seulement si une clé API est fournie
+      if (endpoint.apiKey) {
+        headers["Authorization"] = `Bearer ${endpoint.apiKey}`;
+      }
+      
+      const response = await fetch(`${endpoint.baseUrl}/chat/completions`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${this.config.apiKey}`,
-        },
+        headers,
         body: JSON.stringify({
-          model: this.config.model,
+          model: endpoint.modelName,
           messages,
           temperature: this.config.temperature || 0.7,
           max_tokens: this.config.maxTokens || 2000,
@@ -212,6 +248,7 @@ export const modelConfigStore = {
   currentModel: getDefaultModel(),
   apiKey: "",
   baseUrl: "http://localhost:4000",
+  activeConnections: [] as Array<{id: string, name: string, baseUrl: string, apiKey: string, type: string}>,
   
   // Initialize from localStorage
   init: () => {
@@ -221,6 +258,7 @@ export const modelConfigStore = {
         const config = JSON.parse(saved);
         modelConfigStore.apiKey = config.apiKey || "";
         modelConfigStore.baseUrl = config.baseUrl || "http://localhost:4000";
+        modelConfigStore.activeConnections = config.activeConnections || [];
         
         // Restore model if it exists in our available models
         if (config.currentModel) {
@@ -242,6 +280,7 @@ export const modelConfigStore = {
         apiKey: modelConfigStore.apiKey,
         baseUrl: modelConfigStore.baseUrl,
         currentModel: modelConfigStore.currentModel,
+        activeConnections: modelConfigStore.activeConnections,
       };
       localStorage.setItem('gravis-config', JSON.stringify(config));
     } catch (error) {
@@ -250,8 +289,12 @@ export const modelConfigStore = {
   },
   
   setModel: (model: LLMModel) => {
+    console.log('=== MODEL STORE SET MODEL ===');
+    console.log('Previous model:', modelConfigStore.currentModel);
+    console.log('New model:', model);
     modelConfigStore.currentModel = model;
     modelConfigStore.save();
+    console.log('Model saved. Current model is now:', modelConfigStore.currentModel);
   },
   
   setApiKey: (key: string) => {
@@ -261,6 +304,11 @@ export const modelConfigStore = {
   
   setBaseUrl: (url: string) => {
     modelConfigStore.baseUrl = url;
+    modelConfigStore.save();
+  },
+  
+  setActiveConnections: (connections: Array<{id: string, name: string, baseUrl: string, apiKey: string, type: string}>) => {
+    modelConfigStore.activeConnections = connections;
     modelConfigStore.save();
   },
   

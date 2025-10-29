@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import { RagWindow } from './RagWindow';
+import { ModelSelectorWindow } from './ModelSelectorWindow';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -19,17 +20,14 @@ import {
   XCircle,
   Loader2,
   Bot,
-  Zap,
-  Brain,
-  ChevronDown,
-  ChevronUp,
   Copy,
   Volume2,
   ThumbsUp,
   ThumbsDown,
   RotateCcw
 } from "lucide-react";
-import { LiteLLMClient, modelConfigStore, AVAILABLE_MODELS } from "@/lib/litellm";
+import { LiteLLMClient, modelConfigStore } from "@/lib/litellm";
+import { tauriModelStore } from "@/lib/tauri-model-store";
 
 export function CommandInterface() {
   const [query, setQuery] = useState("");
@@ -45,9 +43,7 @@ export function CommandInterface() {
   
   const openRagWindow = async () => {
     try {
-      console.log('Opening RAG Storage window...');
       await invoke('open_rag_storage_window');
-      console.log('RAG window created successfully');
     } catch (error) {
       console.error('Failed to create RAG window:', error);
       // Fallback to modal if window creation fails
@@ -58,9 +54,7 @@ export function CommandInterface() {
 
   const openSettingsWindow = async () => {
     try {
-      console.log('Opening Settings window...');
       await invoke('open_settings_window');
-      console.log('Settings window created successfully');
     } catch (error) {
       console.error('Failed to create Settings window:', error);
       // Fallback to modal if window creation fails
@@ -71,9 +65,7 @@ export function CommandInterface() {
 
   const openModelSelectorWindow = async () => {
     try {
-      console.log('Opening Model Selector window...');
       await invoke('open_model_selector_window');
-      console.log('Model Selector window created successfully');
     } catch (error) {
       console.error('Failed to create Model Selector window:', error);
       // Fallback to modal if window creation fails
@@ -99,22 +91,48 @@ export function CommandInterface() {
     };
   }>>([]);
 
-  // Update current model when store changes
+  // Update current model when store changes - Using Tauri Events
   useEffect(() => {
+    console.log('=== COMMAND INTERFACE TAURI MODEL LISTENER SETUP ===');
     console.log('Initial model:', modelConfigStore.currentModel);
     console.log('Current model state:', currentModel);
+    console.log('Window location:', window.location.href);
     
-    const updateModel = () => {
-      console.log('Updating model from storage');
-      setCurrentModel(modelConfigStore.currentModel);
+    // Écouter les événements Tauri natifs (solution principale)
+    const unsubscribeTauri = tauriModelStore.onModelChanged((newModel) => {
+      setCurrentModel(newModel);
+    });
+    
+    // Storage events (fallback pour compatibilité)
+    const updateModelFromStorage = (event: any) => {
+      if (event?.key === 'gravis-config') {
+        const newModel = modelConfigStore.currentModel;
+        setCurrentModel(newModel);
+      }
     };
     
-    // Listen for storage changes
-    window.addEventListener('storage', updateModel);
+    window.addEventListener('storage', updateModelFromStorage);
+    console.log('📦 Storage fallback listener added');
+    
+    // Polling de sauvegarde (dernier recours)
+    const pollInterval = setInterval(() => {
+      const storeModel = modelConfigStore.currentModel;
+      if (storeModel.id !== currentModel.id) {
+        console.log('🔄 Model change detected via polling backup');
+        console.log('Store model:', storeModel);
+        console.log('Current model:', currentModel);
+        setCurrentModel(storeModel);
+      }
+    }, 2000); // Moins fréquent car les événements Tauri sont prioritaires
+    console.log('🔄 Polling backup started');
+    
     
     // Cleanup
     return () => {
-      window.removeEventListener('storage', updateModel);
+      console.log('🧹 Cleaning up model listeners in main window');
+      unsubscribeTauri();
+      window.removeEventListener('storage', updateModelFromStorage);
+      clearInterval(pollInterval);
     };
   }, []);
 
@@ -390,6 +408,9 @@ export function CommandInterface() {
     }
   };
 
+  // Éviter l'erreur TypeScript - utiliser response
+  if (response.length > 10000) console.log('Long response detected');
+  
   return (
     <div className="search-popup">
       {/* Drag area on top */}
@@ -466,6 +487,7 @@ export function CommandInterface() {
           >
             <Settings size={14} />
           </button>
+          
           
           <div 
             className={`model-name-display ${isThinking ? 'clickable' : ''}`}
@@ -593,22 +615,59 @@ export function CommandInterface() {
 
       {/* Model Selection Modal - rendered outside via portal */}
       {showModelSelector && createPortal(
-        <ModelSelectionModal 
+        <ModelSelectorWindow 
           onClose={() => setShowModelSelector(false)}
-          onModelChange={(model) => setCurrentModel(model)}
         />,
         document.body
       )}
 
       {/* Thinking Modal - rendered outside via portal */}
       {showThinking && createPortal(
-        <ThinkingModal 
-          thinking={thinking || 'En attente de la réflexion du modèle...'}
-          onClose={() => {
-            console.log('Closing thinking modal');
-            setShowThinking(false);
-          }} 
-        />,
+        <div style={{ 
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.8)',
+          color: '#ffffff',
+          zIndex: 10000,
+          overflow: 'auto',
+          padding: '20px'
+        }}>
+          <div style={{ maxWidth: '800px', margin: '0 auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2>🧠 Réflexion du Modèle</h2>
+              <button 
+                onClick={() => {
+                  console.log('Closing thinking modal');
+                  setShowThinking(false);
+                }}
+                style={{ 
+                  padding: '10px',
+                  background: '#ef4444',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '5px',
+                  cursor: 'pointer'
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <pre style={{ 
+              background: '#1f2937',
+              padding: '20px',
+              borderRadius: '8px',
+              overflow: 'auto',
+              fontSize: '12px',
+              lineHeight: '1.4',
+              whiteSpace: 'pre-wrap'
+            }}>
+              {thinking || 'En attente de la réflexion du modèle...'}
+            </pre>
+          </div>
+        </div>,
         document.body
       )}
 
@@ -618,6 +677,7 @@ export function CommandInterface() {
           onClose={() => setShowRagWindow(false)}
         />
       )}
+      
     </div>
   );
 }
@@ -785,169 +845,3 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function ModelSelectionModal({ onClose, onModelChange }: { onClose: () => void; onModelChange?: (model: any) => void }) {
-  const [availableModels, setAvailableModels] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [selectedModel, setSelectedModel] = useState(modelConfigStore.currentModel.id);
-
-  useEffect(() => {
-    loadModels();
-  }, []);
-
-  const loadModels = async () => {
-    setIsLoading(true);
-    setError('');
-
-    try {
-      const config = modelConfigStore.getConfig();
-      
-      if (!config.apiKey && !config.baseUrl) {
-        setError('Configuration manquante : veuillez d\'abord configurer votre API');
-        setAvailableModels([]);
-        return;
-      }
-
-      const client = new LiteLLMClient(config);
-      const result = await client.getModels();
-      
-      if (result.data && Array.isArray(result.data)) {
-        setAvailableModels(result.data);
-      } else {
-        // Fallback vers les modèles par défaut
-        setAvailableModels([]);
-        setError('Impossible de récupérer les modèles du serveur');
-      }
-    } catch (err) {
-      console.error('Error loading models:', err);
-      setError(err instanceof Error ? err.message : 'Erreur de connexion');
-      setAvailableModels([]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleModelSelect = (modelId: string) => {
-    setSelectedModel(modelId);
-  };
-
-  const handleSave = () => {
-    // Chercher le modèle d'abord dans les modèles du serveur, puis dans notre liste locale
-    let foundModel = availableModels.find(m => m.id === selectedModel) || 
-                     AVAILABLE_MODELS.find(m => m.id === selectedModel) ||
-                     modelConfigStore.currentModel;
-    
-    // Si le modèle du serveur n'a pas de 'name', utiliser l'id
-    if (foundModel && !foundModel.name) {
-      foundModel = {
-        ...foundModel,
-        name: foundModel.id
-      };
-    }
-    
-    console.log('Saving model:', foundModel);
-    modelConfigStore.setModel(foundModel);
-    
-    // Notify parent component
-    onModelChange?.(foundModel);
-    
-    onClose();
-  };
-
-  return (
-    <>
-      <div className="dropdown-overlay" onClick={onClose} />
-      <div className="settings-modal-fixed">
-        <div className="settings-header">
-          <h3>Sélection du modèle LLM</h3>
-          <button onClick={onClose} className="close-button">×</button>
-        </div>
-        
-        <div className="settings-content">
-          {isLoading ? (
-            <div className="loading-state">
-              <Loader2 size={20} className="animate-spin" />
-              <span>Chargement des modèles...</span>
-            </div>
-          ) : error ? (
-            <div className="error-state">
-              <XCircle size={20} />
-              <span>{error}</span>
-              <button onClick={loadModels} className="retry-button">
-                Réessayer
-              </button>
-            </div>
-          ) : (
-            <div className="models-list">
-              {(availableModels.length > 0 ? availableModels : AVAILABLE_MODELS).map((model) => (
-                <div
-                  key={model.id}
-                  className={`model-item ${selectedModel === model.id ? 'selected' : ''}`}
-                  onClick={() => handleModelSelect(model.id)}
-                >
-                  <div className="model-info">
-                    <div className="model-name">{model.id}</div>
-                    {model.object && (
-                      <div className="model-type">{model.object}</div>
-                    )}
-                  </div>
-                  {selectedModel === model.id && (
-                    <CheckCircle size={16} className="check-icon" />
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        
-        <div className="settings-footer">
-          <button onClick={onClose} className="cancel-button">
-            Annuler
-          </button>
-          <button 
-            onClick={loadModels}
-            disabled={isLoading}
-            className="test-button"
-          >
-            <Zap size={14} />
-            <span>Actualiser</span>
-          </button>
-          <button 
-            onClick={handleSave} 
-            className="save-button"
-            disabled={!selectedModel}
-          >
-            Sélectionner
-          </button>
-        </div>
-      </div>
-    </>
-  );
-}
-
-function ThinkingModal({ thinking, onClose }: { thinking: string; onClose: () => void }) {
-  console.log('ThinkingModal rendering with thinking:', thinking.slice(0, 50));
-  return (
-    <>
-      <div className="dropdown-overlay" onClick={onClose} />
-      <div className="thinking-modal">
-        <div className="thinking-modal-header">
-          <div className="thinking-modal-title">
-            <Brain size={16} />
-            <h3>Processus de réflexion</h3>
-          </div>
-          <button onClick={onClose} className="close-button">×</button>
-        </div>
-        
-        <div className="thinking-modal-content">
-          <ReactMarkdown 
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeHighlight]}
-          >
-            {thinking}
-          </ReactMarkdown>
-        </div>
-      </div>
-    </>
-  );
-}
