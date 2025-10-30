@@ -6,6 +6,7 @@ import { modelConfigStore, type LLMModel } from './litellm';
 
 export class TauriModelStore {
   private listeners: Set<(model: LLMModel) => void> = new Set();
+  private parametersListeners: Set<(parameters: any) => void> = new Set();
   private unlisteners: UnlistenFn[] = [];
   private isInitialized = false;
 
@@ -18,7 +19,7 @@ export class TauriModelStore {
 
     try {
       // Écouter les événements model_changed de toutes les fenêtres
-      const unlisten = await listen<LLMModel>('model_changed', (event) => {
+      const unlistenModel = await listen<LLMModel>('model_changed', (event) => {
         // Mettre à jour le store local
         modelConfigStore.setModel(event.payload);
         
@@ -32,7 +33,28 @@ export class TauriModelStore {
         });
       });
 
-      this.unlisteners.push(unlisten);
+      // Écouter les événements parameters_changed de toutes les fenêtres
+      const unlistenParameters = await listen<any>('parameters_changed', (event) => {
+        console.log('🔧 TauriModelStore: Received parameters_changed event:', event.payload);
+        
+        // Mettre à jour le store local SILENCIEUSEMENT pour éviter la boucle
+        modelConfigStore.modelParameters = {
+          ...modelConfigStore.modelParameters,
+          ...event.payload
+        };
+        modelConfigStore.save();
+        
+        // Notifier tous les listeners locaux
+        this.parametersListeners.forEach(listener => {
+          try {
+            listener(event.payload);
+          } catch (error) {
+            console.error('Error in parameters change listener:', error);
+          }
+        });
+      });
+
+      this.unlisteners.push(unlistenModel, unlistenParameters);
       this.isInitialized = true;
       
     } catch (error) {
@@ -51,6 +73,23 @@ export class TauriModelStore {
     } catch (error) {
       console.error('Failed to emit model change:', error);
       throw error;
+    }
+  }
+
+  // Émettre un changement de paramètres vers toutes les fenêtres
+  async emitParametersChanged(parameters: any) {
+    try {
+      console.log('🔧 TauriModelStore: Emitting parameters change:', parameters);
+      
+      // Utiliser la commande Rust pour émettre les paramètres
+      // Les paramètres seront sauvegardés localement quand on recevra l'événement
+      await invoke('emit_parameters_changed', { parameters });
+      
+      console.log('🔧 TauriModelStore: Parameters change broadcasted successfully');
+    } catch (error) {
+      console.error('Failed to emit parameters change:', error);
+      // Fallback vers localStorage seulement en cas d'échec
+      modelConfigStore.setModelParameters(parameters);
     }
   }
 
@@ -88,6 +127,26 @@ export class TauriModelStore {
     };
   }
 
+  // S'abonner aux changements de paramètres
+  onParametersChanged(callback: (parameters: any) => void): () => void {
+    this.parametersListeners.add(callback);
+    
+    // Notifier immédiatement avec les paramètres actuels
+    const currentParameters = modelConfigStore.modelParameters;
+    if (currentParameters) {
+      try {
+        callback(currentParameters);
+      } catch (error) {
+        console.error('Error in immediate parameters callback:', error);
+      }
+    }
+    
+    // Retourner une fonction de nettoyage
+    return () => {
+      this.parametersListeners.delete(callback);
+    };
+  }
+
   // Vérifier si une fenêtre existe
   async checkWindowExists(windowLabel: string): Promise<boolean> {
     try {
@@ -107,6 +166,7 @@ export class TauriModelStore {
     this.unlisteners.forEach(unlisten => unlisten());
     this.unlisteners = [];
     this.listeners.clear();
+    this.parametersListeners.clear();
     this.isInitialized = false;
   }
 

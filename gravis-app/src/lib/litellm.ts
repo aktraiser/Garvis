@@ -18,6 +18,10 @@ export interface LLMConfig {
   model: string;
   temperature?: number;
   maxTokens?: number;
+  topP?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+  systemPrompt?: string;
 }
 
 // Available models configuration
@@ -100,8 +104,15 @@ export class LiteLLMClient {
   private getEndpointForModel(): { baseUrl: string; apiKey: string; modelName: string } {
     const currentModel = modelConfigStore.currentModel;
     
+    console.log('🔍 getEndpointForModel - Current model:', currentModel);
+    console.log('🔍 Provider check:', currentModel.provider);
+    console.log('🔍 ID check:', currentModel.id);
+    
     // Pour les modèles Ollama, router vers localhost:11434
-    if (currentModel.provider === 'Ollama' || currentModel.id.startsWith('ollama/')) {
+    if (currentModel.provider === 'Ollama' || 
+        currentModel.provider === 'Ollama (Local)' || 
+        currentModel.id.startsWith('ollama/')) {
+      console.log('✅ Using Ollama endpoint: localhost:11434');
       return {
         baseUrl: 'http://localhost:11434',
         apiKey: '', // Ollama n'a pas besoin de clé API
@@ -131,7 +142,18 @@ export class LiteLLMClient {
         headers["Authorization"] = `Bearer ${endpoint.apiKey}`;
       }
       
-      const response = await fetch(`${endpoint.baseUrl}/chat/completions`, {
+      // Utiliser l'endpoint correct selon le provider
+      const currentModel = modelConfigStore.currentModel;
+      const isOllamaProvider = currentModel.provider === 'Ollama' || 
+                              currentModel.provider === 'Ollama (Local)' || 
+                              currentModel.id.startsWith('ollama/');
+      const apiEndpoint = isOllamaProvider ? 
+        `${endpoint.baseUrl}/v1/chat/completions` : 
+        `${endpoint.baseUrl}/chat/completions`;
+      
+      console.log('🎯 Final API endpoint:', apiEndpoint);
+      
+      const response = await fetch(apiEndpoint, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -139,6 +161,9 @@ export class LiteLLMClient {
           messages,
           temperature: this.config.temperature || 0.7,
           max_tokens: this.config.maxTokens || 2000,
+          top_p: this.config.topP || 1.0,
+          frequency_penalty: this.config.frequencyPenalty || 0.0,
+          presence_penalty: this.config.presencePenalty || 0.0,
           stream: false,
         }),
       });
@@ -166,7 +191,18 @@ export class LiteLLMClient {
         headers["Authorization"] = `Bearer ${endpoint.apiKey}`;
       }
       
-      const response = await fetch(`${endpoint.baseUrl}/chat/completions`, {
+      // Utiliser l'endpoint correct selon le provider
+      const currentModel = modelConfigStore.currentModel;
+      const isOllamaProvider = currentModel.provider === 'Ollama' || 
+                              currentModel.provider === 'Ollama (Local)' || 
+                              currentModel.id.startsWith('ollama/');
+      const apiEndpoint = isOllamaProvider ? 
+        `${endpoint.baseUrl}/v1/chat/completions` : 
+        `${endpoint.baseUrl}/chat/completions`;
+      
+      console.log('🎯 Final API endpoint:', apiEndpoint);
+      
+      const response = await fetch(apiEndpoint, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -174,6 +210,9 @@ export class LiteLLMClient {
           messages,
           temperature: this.config.temperature || 0.7,
           max_tokens: this.config.maxTokens || 2000,
+          top_p: this.config.topP || 1.0,
+          frequency_penalty: this.config.frequencyPenalty || 0.0,
+          presence_penalty: this.config.presencePenalty || 0.0,
           stream: true,
         }),
       });
@@ -190,6 +229,11 @@ export class LiteLLMClient {
   }
 
   async getModels() {
+    // Si aucune connexion n'est configurée, retourner une liste vide
+    if (modelConfigStore.activeConnections.length === 0 && !modelConfigStore.selectedConnectionId) {
+      return { data: [] };
+    }
+
     try {
       const response = await fetch(`${this.baseUrl}/models`, {
         headers: {
@@ -204,7 +248,12 @@ export class LiteLLMClient {
       return await response.json();
     } catch (error) {
       console.error("Failed to fetch models:", error);
-      return { data: AVAILABLE_MODELS };
+      // Si on a des connexions mais que ça échoue, retourner les modèles par défaut
+      if (modelConfigStore.activeConnections.length > 0 || modelConfigStore.selectedConnectionId) {
+        return { data: AVAILABLE_MODELS };
+      }
+      // Sinon, liste vide
+      return { data: [] };
     }
   }
 
@@ -231,8 +280,39 @@ export class LiteLLMClient {
 }
 
 // Model selection utilities
-export const getModelById = (id: string): LLMModel | undefined => {
-  return AVAILABLE_MODELS.find(model => model.id === id);
+export const getModelById = async (id: string): Promise<LLMModel | undefined> => {
+  // 1. Chercher dans les modèles statiques d'abord
+  const staticModel = AVAILABLE_MODELS.find(model => model.id === id);
+  if (staticModel) {
+    return staticModel;
+  }
+  
+  // 2. Si c'est un modèle Ollama, essayer de le créer dynamiquement
+  if (id.startsWith('ollama/')) {
+    try {
+      const { localModelDetector } = await import('./local-models');
+      const ollamaDetection = await localModelDetector.detectOllamaModels();
+      
+      if (ollamaDetection.isAvailable) {
+        const modelName = id.replace('ollama/', '');
+        const ollamaModel = ollamaDetection.models.find(model => 
+          model.name === modelName || model.id === modelName || model.id === id
+        );
+        
+        if (ollamaModel) {
+          return {
+            ...ollamaModel,
+            id: id,
+            provider: 'Ollama (Local)'
+          };
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to detect Ollama model for getModelById:', error);
+    }
+  }
+  
+  return undefined;
 };
 
 export const getModelsByProvider = (provider: string): LLMModel[] => {
@@ -244,14 +324,25 @@ export const getDefaultModel = (): LLMModel => {
 };
 
 // Store configuration with localStorage persistence
-export const modelConfigStore = {
+export const modelConfigStore: any = {
   currentModel: getDefaultModel(),
   apiKey: "",
   baseUrl: "http://localhost:4000",
   activeConnections: [] as Array<{id: string, name: string, baseUrl: string, apiKey: string, type: string}>,
+  selectedConnectionId: null as string | null,
+  
+  // Paramètres par défaut pour les modèles
+  modelParameters: {
+    temperature: 0.7,
+    maxTokens: 2000,
+    topP: 1.0,
+    frequencyPenalty: 0.0,
+    presencePenalty: 0.0,
+    systemPrompt: ''
+  },
   
   // Initialize from localStorage
-  init: () => {
+  init: async () => {
     try {
       const saved = localStorage.getItem('gravis-config');
       if (saved) {
@@ -259,12 +350,24 @@ export const modelConfigStore = {
         modelConfigStore.apiKey = config.apiKey || "";
         modelConfigStore.baseUrl = config.baseUrl || "http://localhost:4000";
         modelConfigStore.activeConnections = config.activeConnections || [];
+        modelConfigStore.selectedConnectionId = config.selectedConnectionId || null;
         
-        // Restore model if it exists in our available models
+        // Restore model parameters
+        if (config.modelParameters) {
+          modelConfigStore.modelParameters = {
+            ...modelConfigStore.modelParameters,
+            ...config.modelParameters
+          };
+        }
+        
+        // Restore model if it exists in our available models (now supports dynamic models)
         if (config.currentModel) {
-          const foundModel = getModelById(config.currentModel.id);
+          const foundModel = await getModelById(config.currentModel.id);
           if (foundModel) {
+            console.log('🔄 Restored model from localStorage:', foundModel);
             modelConfigStore.currentModel = foundModel;
+          } else {
+            console.warn('⚠️ Model not found, keeping default:', config.currentModel.id);
           }
         }
       }
@@ -281,6 +384,8 @@ export const modelConfigStore = {
         baseUrl: modelConfigStore.baseUrl,
         currentModel: modelConfigStore.currentModel,
         activeConnections: modelConfigStore.activeConnections,
+        selectedConnectionId: modelConfigStore.selectedConnectionId,
+        modelParameters: modelConfigStore.modelParameters,
       };
       localStorage.setItem('gravis-config', JSON.stringify(config));
     } catch (error) {
@@ -289,12 +394,8 @@ export const modelConfigStore = {
   },
   
   setModel: (model: LLMModel) => {
-    console.log('=== MODEL STORE SET MODEL ===');
-    console.log('Previous model:', modelConfigStore.currentModel);
-    console.log('New model:', model);
     modelConfigStore.currentModel = model;
     modelConfigStore.save();
-    console.log('Model saved. Current model is now:', modelConfigStore.currentModel);
   },
   
   setApiKey: (key: string) => {
@@ -312,12 +413,67 @@ export const modelConfigStore = {
     modelConfigStore.save();
   },
   
-  getConfig: (): LLMConfig => ({
-    apiKey: modelConfigStore.apiKey,
-    baseUrl: modelConfigStore.baseUrl,
-    model: modelConfigStore.currentModel.id,
-  })
+  setSelectedConnection: (connectionId: string | null) => {
+    modelConfigStore.selectedConnectionId = connectionId;
+    modelConfigStore.save();
+  },
+  
+  setModelParameters: (params: Partial<typeof modelConfigStore.modelParameters>) => {
+    console.log('🔧 Setting model parameters:', params);
+    modelConfigStore.modelParameters = {
+      ...modelConfigStore.modelParameters,
+      ...params
+    };
+    console.log('🔧 Updated model parameters:', modelConfigStore.modelParameters);
+    modelConfigStore.save();
+    console.log('🔧 Model parameters saved to localStorage');
+  },
+  
+  getConfig: (): LLMConfig => {
+    console.log('🔧 getConfig called');
+    console.log('🔧 Current model ID:', modelConfigStore.currentModel.id);
+    console.log('🔧 Selected connection ID:', modelConfigStore.selectedConnectionId);
+    console.log('🔧 Active connections:', modelConfigStore.activeConnections);
+    
+    // Utiliser la connexion sélectionnée si elle existe
+    if (modelConfigStore.selectedConnectionId) {
+      const selectedConnection = modelConfigStore.activeConnections.find(
+        (conn: any) => conn.id === modelConfigStore.selectedConnectionId
+      );
+      if (selectedConnection) {
+        console.log('✅ Using selected connection config:', selectedConnection);
+        return {
+          apiKey: selectedConnection.apiKey,
+          baseUrl: selectedConnection.baseUrl,
+          model: modelConfigStore.currentModel.id,
+          ...modelConfigStore.modelParameters,
+        };
+      }
+    }
+    
+    // Détection automatique pour modèles Ollama
+    if (modelConfigStore.currentModel.id.startsWith('ollama/')) {
+      console.log('✅ Auto-detected Ollama model, using localhost:11434');
+      return {
+        apiKey: '', // Ollama n'a pas besoin de clé API
+        baseUrl: 'http://localhost:11434',
+        model: modelConfigStore.currentModel.id,
+        ...modelConfigStore.modelParameters,
+      };
+    }
+    
+    // Fallback vers les valeurs directes (legacy)
+    console.log('⚠️ Using fallback config - baseUrl:', modelConfigStore.baseUrl);
+    return {
+      apiKey: modelConfigStore.apiKey,
+      baseUrl: modelConfigStore.baseUrl,
+      model: modelConfigStore.currentModel.id,
+      ...modelConfigStore.modelParameters,
+    };
+  }
 };
 
 // Initialize the store on module load
-modelConfigStore.init();
+modelConfigStore.init().catch((error: any) => {
+  console.warn('Failed to initialize modelConfigStore:', error);
+});

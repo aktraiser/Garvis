@@ -115,9 +115,34 @@ export class UnifiedModelClient {
       }
     }
 
-    // 2. Ajouter les modèles par défaut si aucune connexion active
-    if (allModels.length === 0) {
-      // Fallback vers les modèles statiques
+    // 1.5. Toujours essayer de détecter Ollama automatiquement (même sans connexion configurée)
+    try {
+      const ollamaDetection = await localModelDetector.detectOllamaModels();
+      if (ollamaDetection.isAvailable && ollamaDetection.models.length > 0) {
+        // Ajouter les modèles Ollama avec préfixe
+        const ollamaModels = ollamaDetection.models.map(model => ({
+          ...model,
+          id: model.id.startsWith('ollama/') ? model.id : `ollama/${model.id}`,
+          provider: 'Ollama (Local)'
+        }));
+        
+        allModels.push(...ollamaModels);
+        
+        sources.push({
+          name: 'Ollama (Détecté automatiquement)',
+          type: 'ollama',
+          baseUrl: 'http://localhost:11434',
+          modelCount: ollamaModels.length,
+          isAvailable: true
+        });
+      }
+    } catch (error) {
+      console.log('Ollama auto-detection failed:', error);
+    }
+
+    // 2. Ajouter les modèles par défaut seulement si on a des connexions mais pas de modèles
+    if (allModels.length === 0 && activeConnections.length > 0) {
+      // Fallback vers les modèles statiques uniquement si on a des connexions configurées mais qui échouent
       const { AVAILABLE_MODELS } = await import('./litellm');
       allModels.push(...AVAILABLE_MODELS);
       

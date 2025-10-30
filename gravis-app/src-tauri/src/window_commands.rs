@@ -107,6 +107,41 @@ pub async fn open_model_selector_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn open_conversations_window(app: AppHandle) -> Result<(), String> {
+    tracing::info!("Creating Conversations window");
+    
+    // Avoid creating duplicates
+    if app.get_webview_window("conversations").is_some() {
+        tracing::info!("Conversations window already exists, focusing it");
+        if let Some(window) = app.get_webview_window("conversations") {
+            let _ = window.set_focus();
+        }
+        return Ok(());
+    }
+
+    match WebviewWindowBuilder::new(
+        &app,
+        "conversations",                         // window label
+        WebviewUrl::App("index.html#conversations".into()), // SPA with route /conversations
+    )
+    .title("Historique des Conversations")
+    .inner_size(1200.0, 800.0)
+    .min_inner_size(800.0, 600.0)
+    .resizable(true)
+    .center()
+    .build() {
+        Ok(_) => {
+            tracing::info!("Conversations window created successfully");
+            Ok(())
+        },
+        Err(e) => {
+            tracing::error!("Failed to create Conversations window: {}", e);
+            Err(format!("Failed to create Conversations window: {}", e))
+        }
+    }
+}
+
+#[tauri::command]
 pub async fn emit_model_changed(app: AppHandle, model: serde_json::Value) -> Result<(), String> {
     tracing::info!("Emitting model_changed event to all windows: {:?}", model);
     
@@ -115,7 +150,7 @@ pub async fn emit_model_changed(app: AppHandle, model: serde_json::Value) -> Res
         .map_err(|e| format!("Failed to emit global model_changed event: {}", e))?;
     
     // Émettre aussi spécifiquement à chaque fenêtre connue pour plus de robustesse
-    let known_windows = ["main", "model_selector", "settings", "rag"];
+    let known_windows = ["main", "model_selector", "settings", "rag", "conversations"];
     for window_label in known_windows.iter() {
         if let Some(window) = app.get_webview_window(window_label) {
             let _ = window.emit("model_changed", model.clone());
@@ -124,6 +159,27 @@ pub async fn emit_model_changed(app: AppHandle, model: serde_json::Value) -> Res
     }
     
     tracing::info!("Model change event broadcasted successfully");
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn emit_parameters_changed(app: AppHandle, parameters: serde_json::Value) -> Result<(), String> {
+    tracing::info!("Emitting parameters_changed event to all windows: {:?}", parameters);
+    
+    // Émettre l'événement globalement à toutes les fenêtres
+    app.emit("parameters_changed", parameters.clone())
+        .map_err(|e| format!("Failed to emit global parameters_changed event: {}", e))?;
+    
+    // Émettre aussi spécifiquement à chaque fenêtre connue pour plus de robustesse
+    let known_windows = ["main", "model_selector", "settings", "rag", "conversations"];
+    for window_label in known_windows.iter() {
+        if let Some(window) = app.get_webview_window(window_label) {
+            let _ = window.emit("parameters_changed", parameters.clone());
+            tracing::debug!("Emitted parameters_changed to window: {}", window_label);
+        }
+    }
+    
+    tracing::info!("Parameters change event broadcasted successfully");
     Ok(())
 }
 
@@ -151,7 +207,7 @@ pub async fn broadcast_to_window(
 #[tauri::command]
 pub async fn get_active_windows(app: AppHandle) -> Result<Vec<String>, String> {
     let mut active_windows = Vec::new();
-    let known_windows = ["main", "model_selector", "settings", "rag"];
+    let known_windows = ["main", "model_selector", "settings", "rag", "conversations"];
     
     for window_label in known_windows.iter() {
         if app.get_webview_window(window_label).is_some() {

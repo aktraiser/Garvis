@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { RagWindow } from './RagWindow';
 import { ModelSelectorWindow } from './ModelSelectorWindow';
 import ReactMarkdown from 'react-markdown';
@@ -12,7 +13,6 @@ import {
   Globe, 
   FileText,
   Radio, 
-  Search, 
   Mic,
   Settings,
   Wifi,
@@ -24,10 +24,12 @@ import {
   Volume2,
   ThumbsUp,
   ThumbsDown,
-  RotateCcw
+  RotateCcw,
+  MessageSquare
 } from "lucide-react";
 import { LiteLLMClient, modelConfigStore } from "@/lib/litellm";
 import { tauriModelStore } from "@/lib/tauri-model-store";
+import { conversationManager } from "@/lib/conversation-manager";
 
 export function CommandInterface() {
   const [query, setQuery] = useState("");
@@ -49,6 +51,14 @@ export function CommandInterface() {
       // Fallback to modal if window creation fails
       console.log('Falling back to modal');
       setShowRagWindow(true);
+    }
+  };
+
+  const openConversationsWindow = async () => {
+    try {
+      await invoke('open_conversations_window');
+    } catch (error) {
+      console.error('Failed to create Conversations window:', error);
     }
   };
 
@@ -91,6 +101,16 @@ export function CommandInterface() {
     };
   }>>([]);
 
+  // Synchronisation immédiate au montage
+  useEffect(() => {
+    // Forcer une synchronisation avec le store au montage
+    const storeModel = modelConfigStore.currentModel;
+    if (storeModel.id !== currentModel.id) {
+      console.log('🔄 Initial sync - updating to store model:', storeModel);
+      setCurrentModel(storeModel);
+    }
+  }, []);
+
   // Update current model when store changes - Using Tauri Events
   useEffect(() => {
     console.log('=== COMMAND INTERFACE TAURI MODEL LISTENER SETUP ===');
@@ -101,6 +121,13 @@ export function CommandInterface() {
     // Écouter les événements Tauri natifs (solution principale)
     const unsubscribeTauri = tauriModelStore.onModelChanged((newModel) => {
       setCurrentModel(newModel);
+    });
+
+    // Écouter les changements de paramètres
+    const unsubscribeParameters = tauriModelStore.onParametersChanged((newParameters) => {
+      console.log('🔧 CommandInterface: Received parameters update:', newParameters);
+      // Les paramètres sont déjà mis à jour dans modelConfigStore par tauriModelStore
+      // Pas besoin de state local pour les paramètres
     });
     
     // Storage events (fallback pour compatibilité)
@@ -114,27 +141,34 @@ export function CommandInterface() {
     window.addEventListener('storage', updateModelFromStorage);
     console.log('📦 Storage fallback listener added');
     
-    // Polling de sauvegarde (dernier recours)
+    // Cleanup
+    return () => {
+      console.log('🧹 Cleaning up model listeners in main window');
+      unsubscribeTauri();
+      unsubscribeParameters();
+      window.removeEventListener('storage', updateModelFromStorage);
+    };
+  }, []);
+
+  // Separate polling effect with currentModel dependency to avoid stale closure
+  useEffect(() => {
     const pollInterval = setInterval(() => {
       const storeModel = modelConfigStore.currentModel;
       if (storeModel.id !== currentModel.id) {
         console.log('🔄 Model change detected via polling backup');
         console.log('Store model:', storeModel);
         console.log('Current model:', currentModel);
+        console.log('📝 About to call setCurrentModel with:', storeModel);
         setCurrentModel(storeModel);
+        console.log('✅ setCurrentModel called');
       }
-    }, 2000); // Moins fréquent car les événements Tauri sont prioritaires
+    }, 2000);
     console.log('🔄 Polling backup started');
     
-    
-    // Cleanup
     return () => {
-      console.log('🧹 Cleaning up model listeners in main window');
-      unsubscribeTauri();
-      window.removeEventListener('storage', updateModelFromStorage);
       clearInterval(pollInterval);
     };
-  }, []);
+  }, [currentModel]); // Include currentModel in dependencies to fix stale closure
 
   const handleVoiceInput = () => {
     setIsListening(!isListening);
@@ -145,6 +179,55 @@ export function CommandInterface() {
   useEffect(() => {
     console.log('State update - isThinking:', isThinking, 'thinking length:', thinking?.length || 0, 'isProcessing:', isProcessing, 'clickable condition:', isThinking);
   }, [isThinking, thinking, isProcessing]);
+
+  // Listen for conversation resume events from other windows
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setupEventListener = async () => {
+      try {
+        unlisten = await listen('resume_conversation', (event: any) => {
+          console.log('📥 Événement de reprise de conversation reçu:', event.payload);
+          const { conversation } = event.payload;
+          
+          if (conversation && conversation.id) {
+            // Reprendre la conversation dans le gestionnaire
+            const resumedConversation = conversationManager.resumeConversation(conversation.id);
+            
+            if (resumedConversation) {
+              // Charger l'historique dans l'interface
+              const historyMessages = resumedConversation.messages.map(msg => ({
+                id: msg.id,
+                type: msg.role as 'user' | 'assistant',
+                content: msg.content,
+                timestamp: msg.timestamp
+              }));
+              
+              setConversationHistory(historyMessages);
+              console.log('✅ Conversation reprise avec succès:', resumedConversation.title);
+              
+              // Clear current response/thinking state
+              setResponse("");
+              setThinking("");
+              setShowThinking(false);
+              setIsThinking(false);
+            }
+          }
+        });
+      } catch (error) {
+        console.error('❌ Erreur lors de l\'écoute des événements:', error);
+      }
+    };
+
+    setupEventListener();
+    
+    // Cleanup function
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, []);
 
   // Auto-resize window based on conversation content
   useEffect(() => {
@@ -168,6 +251,13 @@ export function CommandInterface() {
 
   // Helper function to add assistant response to conversation history
   const addAssistantResponse = (content: string, thinkingContent?: string, metrics?: any) => {
+    // Ajouter la réponse de l'assistant au gestionnaire de conversations
+    if (conversationManager.getCurrentConversation()) {
+      conversationManager.addMessage('assistant', content);
+      conversationManager.saveCurrentConversation();
+      console.log('💾 Réponse assistant sauvegardée dans la conversation');
+    }
+    
     const assistantMessage = {
       id: (Date.now() + 1).toString(),
       type: 'assistant' as const,
@@ -181,6 +271,10 @@ export function CommandInterface() {
 
   // Function to start a new conversation
   const handleNewConversation = () => {
+    // Terminer la conversation actuelle avant d'en démarrer une nouvelle
+    conversationManager.endCurrentConversation();
+    console.log('🔄 Nouvelle conversation démarrée');
+    
     setConversationHistory([]);
     setResponse("");
     setThinking("");
@@ -194,6 +288,15 @@ export function CommandInterface() {
     if (!query.trim() || isProcessing) return;
 
     const userQuery = query.trim();
+    
+    // Démarrer ou continuer une conversation avec le gestionnaire
+    let conversation = conversationManager.getCurrentConversation();
+    if (!conversation) {
+      conversation = conversationManager.startNewConversation(userQuery, modelConfigStore.currentModel.name);
+      console.log('📝 Nouvelle conversation créée:', conversation.title);
+    } else {
+      conversationManager.addMessage('user', userQuery);
+    }
     
     // Add user message to conversation history
     const userMessage = {
@@ -223,12 +326,25 @@ export function CommandInterface() {
     let outputTokens = 0;
 
     try {
+      console.log('🚀 Starting handleSubmit...');
       const config = modelConfigStore.getConfig();
+      console.log('🔧 Got config:', config);
+      console.log('🔧 System prompt from config:', config.systemPrompt);
+      console.log('🔧 Model parameters from store:', modelConfigStore.modelParameters);
       
-      if (!config.apiKey) {
+      // Utiliser les paramètres les plus récents du store
+      const currentSystemPrompt = modelConfigStore.modelParameters.systemPrompt || config.systemPrompt;
+      console.log('🔧 Final system prompt to use:', currentSystemPrompt);
+      
+      if (!config.apiKey && 
+          modelConfigStore.currentModel.provider !== 'Ollama' && 
+          modelConfigStore.currentModel.provider !== 'Ollama (Local)') {
+        console.log('❌ Missing API key for non-Ollama model');
         setResponse("⚠️ Configuration manquante : Veuillez configurer votre clé API dans les paramètres du modèle.");
         return;
       }
+      
+      console.log('✅ Config validation passed');
 
       // Check if current model supports thinking
       const currentModel = modelConfigStore.currentModel;
@@ -244,18 +360,22 @@ export function CommandInterface() {
         setIsThinking(true);
       }
 
+      console.log('🔧 Creating LiteLLMClient with config:', config);
       const client = new LiteLLMClient(config);
+      console.log('✅ LiteLLMClient created successfully');
       
       const messages = [
         {
           role: "system",
-          content: "Tu es GRAVIS, un assistant spécialisé dans l'audit et l'analyse de code. Réponds de manière concise et professionnelle."
+          content: `RÔLE OBLIGATOIRE : ${currentSystemPrompt || "Tu es GRAVIS, un assistant spécialisé dans l'audit et l'analyse de code. Réponds de manière concise et professionnelle."} Tu DOIS impérativement respecter ce rôle dans toutes tes réponses.`
         },
         {
           role: "user", 
           content: userQuery
         }
       ];
+      
+      console.log('🔧 Messages being sent to API:', JSON.stringify(messages, null, 2));
 
       // Use streaming for thinking models to show real-time reasoning
       if (supportsThinking) {
@@ -338,8 +458,6 @@ export function CommandInterface() {
         // Non-thinking models use regular chat
         const result = await client.chat(messages);
         
-        console.log('API Response:', result);
-        
         if (result.choices && result.choices[0]) {
           const choice = result.choices[0];
           
@@ -396,13 +514,7 @@ export function CommandInterface() {
       setResponse(errorMessage);
       
       // Add error response to conversation history
-      const assistantMessage = {
-        id: (Date.now() + 1).toString(),
-        type: 'assistant' as const,
-        content: errorMessage,
-        timestamp: new Date()
-      };
-      setConversationHistory(prev => [...prev, assistantMessage]);
+      addAssistantResponse(errorMessage);
     } finally {
       setIsProcessing(false);
     }
@@ -468,8 +580,13 @@ export function CommandInterface() {
           <button type="button" className="icon-button" title="MCP">
             <Radio size={14} />
           </button>
-          <button type="button" className="icon-button" title="Recherche">
-            <Search size={14} />
+          <button 
+            type="button" 
+            className="icon-button" 
+            title="Historique des conversations"
+            onClick={openConversationsWindow}
+          >
+            <MessageSquare size={14} />
           </button>
           <button 
             type="button" 

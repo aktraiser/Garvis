@@ -3,6 +3,7 @@ import { CommandInterface } from "./components/CommandInterface";
 import { RagPage } from "./pages/RagPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { ModelSelectorPage } from "./pages/ModelSelectorPage";
+import ConversationsPage from "./pages/ConversationsPage";
 
 function App() {
   // Simple routing based on URL hash and pathname
@@ -19,6 +20,10 @@ function App() {
   
   if (pathname === '/model_selector' || hash === '#model_selector') {
     return <ModelSelectorPage />;
+  }
+  
+  if (pathname === '/conversations' || hash === '#conversations') {
+    return <ConversationsPage />;
   }
 
   return (

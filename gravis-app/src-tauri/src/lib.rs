@@ -14,7 +14,7 @@ use rag::ocr::commands::{
 use rag::commands::{
     add_document_intelligent, search_with_metadata, get_document_metadata
 };
-use window_commands::{open_rag_storage_window, open_settings_window, open_model_selector_window, emit_model_changed, broadcast_to_window, get_active_windows};
+use window_commands::{open_rag_storage_window, open_settings_window, open_model_selector_window, open_conversations_window, emit_model_changed, emit_parameters_changed, broadcast_to_window, get_active_windows};
 
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -73,6 +73,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(ocr_state)
         .manage(rag_state)
         .invoke_handler(tauri::generate_handler![
@@ -81,7 +82,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             open_rag_storage_window,
             open_settings_window,
             open_model_selector_window,
+            open_conversations_window,
             emit_model_changed,
+            emit_parameters_changed,
             broadcast_to_window,
             get_active_windows,
             // RAG Commands Phase 1
