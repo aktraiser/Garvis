@@ -26,6 +26,9 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
+# Phase 2 AWCS: Permissions & Screenshots
+tauri-plugin-os = "2"
+tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
@@ -45,6 +48,14 @@ dashmap = "5.5"
 
 # UUID pour les IDs uniques
 uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# === AWCS Dependencies (Phase 1 & 2) ===
+# Phase 2: macOS permissions & screen capture
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.23"
+core-foundation = "0.9"
+cocoa = "0.25"
+objc = "0.2"
 
 # === Phase 2 RAG: ML & Embeddings ===
 # Candle ecosystem - stable 0.6.x series (production tested)

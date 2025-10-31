@@ -3,6 +3,8 @@
 
 // Module RAG (Phase 2 - avec OCR intégré)
 pub mod rag;
+// Module AWCS (Phase 1 - Core)
+pub mod awcs;
 // Window management commands
 mod window_commands;
 
@@ -13,6 +15,13 @@ use rag::ocr::commands::{
 };
 use rag::commands::{
     add_document_intelligent, search_with_metadata, get_document_metadata
+};
+use awcs::AWCSState;
+use awcs::commands::{
+    awcs_get_current_context, awcs_handle_query, awcs_check_permissions, awcs_request_permissions,
+    awcs_setup_global_shortcut, awcs_get_state, awcs_set_state, awcs_cleanup, awcs_get_metrics,
+    awcs_get_config, awcs_update_config, awcs_open_system_preferences, awcs_show_zone_selector,
+    awcs_trigger_shortcut, awcs_test_extraction, awcs_get_context_ocr_direct
 };
 use window_commands::{open_rag_storage_window, open_settings_window, open_model_selector_window, open_conversations_window, emit_model_changed, emit_parameters_changed, broadcast_to_window, get_active_windows};
 
@@ -60,7 +69,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .with_max_level(tracing::Level::INFO)
         .init();
 
-    tracing::info!("GRAVIS starting with RAG Module Phase 2 + OCR Integration");
+    tracing::info!("GRAVIS starting with RAG Module Phase 2 + OCR Integration + AWCS Phase 1");
 
     // Créer l'état OCR global
     let ocr_state = OcrState::new();
@@ -70,12 +79,16 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         tracing::error!("Failed to initialize RagState: {}", e);
         e
     })?;
+    
+    // Créer l'état AWCS Phase 2 (incrémental)
+    let awcs_state = AWCSState::new();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(ocr_state)
         .manage(rag_state)
+        .manage(awcs_state)
         .invoke_handler(tauri::generate_handler![
             greet,
             // Window Management Commands
@@ -102,7 +115,24 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             // RAG Commands Phase 3 - Unified Intelligence
             add_document_intelligent,
             search_with_metadata,
-            get_document_metadata
+            get_document_metadata,
+            // AWCS Commands Phase 1 - Core
+            awcs_get_current_context,
+            awcs_handle_query,
+            awcs_check_permissions,
+            awcs_request_permissions,
+            awcs_setup_global_shortcut,
+            awcs_get_state,
+            awcs_set_state,
+            awcs_cleanup,
+            awcs_get_metrics,
+            awcs_get_config,
+            awcs_update_config,
+            awcs_open_system_preferences,
+            awcs_show_zone_selector,
+            awcs_trigger_shortcut,
+            awcs_test_extraction,
+            awcs_get_context_ocr_direct
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

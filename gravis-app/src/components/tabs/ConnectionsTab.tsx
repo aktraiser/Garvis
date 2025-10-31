@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { modelConfigStore, LiteLLMClient } from '../../lib/litellm';
+import { AWCSSection } from '../AWCSSection';
 
 interface Connection {
   id: string;
@@ -290,6 +291,9 @@ export const ConnectionsTab: React.FC = () => {
           {testMessage}
         </div>
       )}
+
+      {/* Section AWCS intégrée */}
+      <AWCSSection />
     </div>
   );
 };
