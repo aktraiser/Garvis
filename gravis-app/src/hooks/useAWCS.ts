@@ -146,8 +146,12 @@ export function useAWCS(): UseAWCSReturn {
         throw new Error('Test d\'extraction échoué');
       }
       
-      // 3. Setup raccourci global
-      await invoke('awcs_setup_global_shortcut');
+      // 3. Setup raccourci global (optionnel - ne fait pas échouer l'activation)
+      try {
+        await invoke('awcs_setup_global_shortcut');
+      } catch (shortcutError) {
+        console.warn('Setup raccourcis globaux échoué (non critique):', shortcutError);
+      }
       
       // 4. Activation finale
       setState(AWCSActivationState.Active);
@@ -181,6 +185,7 @@ export function useAWCS(): UseAWCSReturn {
   const testCurrentWindow = useCallback(async (): Promise<ContextEnvelope | null> => {
     try {
       setError(null);
+      // La commande awcs_get_current_context inclut déjà le délai de 2 secondes
       const context = await invoke<ContextEnvelope>('awcs_get_current_context');
       
       // Toast de succès sera géré par le composant

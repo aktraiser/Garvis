@@ -211,7 +211,7 @@ impl Default for AWCSConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            global_shortcut: "Cmd+Shift+G".to_string(),
+            global_shortcut: "Cmd+Shift+Control+L".to_string(),
             extraction_timeout: 5000, // 5 secondes
             max_content_length: 100_000, // 100k caractères
             pii_redaction_enabled: true,

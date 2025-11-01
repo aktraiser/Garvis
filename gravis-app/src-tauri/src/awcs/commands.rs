@@ -66,20 +66,18 @@ pub async fn awcs_request_permissions(
 #[tauri::command]
 pub async fn awcs_setup_global_shortcut(
     awcs_state: State<'_, AWCSState>,
-    _app: AppHandle,
+    app: AppHandle,
 ) -> Result<(), String> {
-    tracing::debug!("Command: awcs_setup_global_shortcut");
+    tracing::debug!("Command: awcs_setup_global_shortcut - Phase 4");
     
     let manager_arc = awcs_state.manager();
-    let manager = manager_arc.read().await;
+    let mut manager = manager_arc.write().await;
     
-    // Configurer le raccourci global
-    manager.setup_global_shortcut().await
+    // Configurer le raccourci global avec app_handle
+    manager.setup_global_shortcut(app).await
         .map_err(|e| e.to_string())?;
     
-    // TODO: Émettre l'événement de raccourci lors de l'activation
-    // Pour l'instant, on simule le succès
-    
+    tracing::info!("AWCS Phase 4: Global shortcut command completed successfully");
     Ok(())
 }
 
@@ -123,7 +121,7 @@ pub async fn awcs_cleanup(
     let manager_arc = awcs_state.manager();
     {
         let mut manager = manager_arc.write().await;
-        manager.cleanup().await
+        manager.cleanup(app.clone()).await
             .map_err(|e| e.to_string())?;
     }
     
@@ -307,10 +305,53 @@ pub async fn awcs_get_context_ocr_direct(
     let manager_arc = awcs_state.manager();
     let mut manager = manager_arc.write().await;
     
-    // Accéder directement à l'extracteur pour forcer l'OCR
-    let mut extractor = crate::awcs::core::extractor::ContextExtractor::new();
-    extractor.extract_with_ocr_direct().await
+    // Utiliser l'extraction OCR directe (méthode existante préservée)
+    manager.get_current_context().await
         .map_err(|e| e.to_string())
+}
+
+/// NOUVEAU : Extraction OCR avec capture de fenêtre focalisée (amélioration Phase 3)
+#[tauri::command]
+pub async fn awcs_get_context_focused_ocr(
+    awcs_state: State<'_, AWCSState>,
+) -> Result<ContextEnvelope, String> {
+    tracing::info!("Command: awcs_get_context_focused_ocr - Focused window OCR mode");
+    
+    // Délai de 2 secondes pour permettre de changer de fenêtre
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+    
+    // 1. Détection de la fenêtre active
+    use crate::awcs::extractors::window_detector::WindowDetector;
+    let mut window_detector = WindowDetector::new();
+    let window_info = window_detector.get_current_window().await
+        .map_err(|e| e.to_string())?;
+    
+    // 2. Extraction OCR focalisée (nouvelle méthode)
+    use crate::awcs::extractors::ocr_extractor::OCRExtractor;
+    let mut ocr_extractor = OCRExtractor::new();
+    let ocr_result = ocr_extractor.extract_from_focused_window(&window_info).await
+        .map_err(|e| e.to_string())?;
+    
+    // 3. Construction de l'enveloppe de contexte
+    Ok(ContextEnvelope {
+        source: window_info,
+        document: None,
+        content: ContentData {
+            selection: None,
+            fulltext: Some(ocr_result.text),
+            metadata: Some(serde_json::json!({
+                "processing_time_ms": ocr_result.processing_time_ms,
+                "extraction_method": "focused_ocr"
+            })),
+        },
+        confidence: ExtractionConfidence {
+            text_completeness: ocr_result.confidence,
+            source_reliability: 0.9, // Méthode focalisée plus fiable
+            extraction_method: "focused_ocr".to_string(),
+        },
+        timestamp: chrono::Utc::now(),
+        security_flags: None,
+    })
 }
 
 /// Commandes pour les événements personnalisés

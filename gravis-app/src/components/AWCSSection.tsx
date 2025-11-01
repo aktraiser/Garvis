@@ -1,10 +1,11 @@
 // GRAVIS AWCS - Section d'activation pour ConnectionTab
 // Interface d'activation AWCS intégrée
 
-import React, { useState } from 'react';
-import { Eye, CheckCircle, AlertCircle, XCircle, Loader2, TestTube, Shield, Info, Camera } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Eye, CheckCircle, AlertCircle, XCircle, Loader2, TestTube, Shield, Info, Camera, Zap } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAWCS } from '../hooks/useAWCS';
+import { useGlobalShortcuts } from '../hooks/useGlobalShortcuts';
 import { AWCSActivationState, AWCSPermissions, AWCSUtils } from '../types/awcs';
 
 export const AWCSSection: React.FC = () => {
@@ -22,8 +23,17 @@ export const AWCSSection: React.FC = () => {
     clearError,
   } = useAWCS();
 
+  // Hook pour les raccourcis globaux (Phase 4)
+  const {
+    error: shortcutError,
+    lastTriggered,
+    setupAWCSShortcut,
+    cleanupShortcuts,
+  } = useGlobalShortcuts();
+
   const [showPermissionsHelp, setShowPermissionsHelp] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [shortcutEnabled, setShortcutEnabled] = useState(false);
 
   const handleTest = async () => {
     setTestResult('⏳ Changez de fenêtre maintenant ! Test dans 2 secondes...');
@@ -76,6 +86,46 @@ export const AWCSSection: React.FC = () => {
     }
   };
 
+  // Gestionnaire pour activer/désactiver les raccourcis globaux
+  const handleShortcutToggle = async () => {
+    try {
+      if (shortcutEnabled) {
+        await cleanupShortcuts();
+        setShortcutEnabled(false);
+      } else {
+        await setupAWCSShortcut();
+        setShortcutEnabled(true);
+      }
+    } catch (error) {
+      console.error('AWCS Phase 4: Failed to toggle shortcut:', error);
+    }
+  };
+
+  // Effet pour écouter les événements de raccourcis globaux
+  useEffect(() => {
+    const handleGlobalShortcut = (event: CustomEvent) => {
+      console.log('AWCS Phase 4: Global shortcut event received!', event.detail);
+      // Déclencher automatiquement l'extraction
+      handleTest();
+    };
+
+    // Écouter l'événement personnalisé émis par le hook useGlobalShortcuts
+    window.addEventListener('awcs-global-shortcut-triggered', handleGlobalShortcut as EventListener);
+
+    return () => {
+      window.removeEventListener('awcs-global-shortcut-triggered', handleGlobalShortcut as EventListener);
+    };
+  }, [handleTest]);
+
+  // Nettoyage des raccourcis lors du démontage du composant
+  useEffect(() => {
+    return () => {
+      if (shortcutEnabled) {
+        cleanupShortcuts();
+      }
+    };
+  }, [shortcutEnabled, cleanupShortcuts]);
+
   return (
     <div style={{
       borderTop: '1px solid rgba(255, 255, 255, 0.1)',
@@ -126,16 +176,7 @@ export const AWCSSection: React.FC = () => {
         fontSize: '14px',
         lineHeight: '1.4'
       }}>
-        Analysez le contenu de votre fenêtre active avec{' '}
-        <kbd style={{
-          backgroundColor: 'rgba(255, 255, 255, 0.1)',
-          padding: '2px 4px',
-          borderRadius: '3px',
-          fontSize: '12px',
-          fontFamily: 'monospace'
-        }}>
-          {navigator.platform.includes('Mac') ? '⌘⇧G' : 'Ctrl+Shift+G'}
-        </kbd>
+        Analysez le contenu de votre fenêtre active avec les boutons d'extraction ci-dessous
       </p>
 
       {/* Status Cards */}
@@ -146,52 +187,208 @@ export const AWCSSection: React.FC = () => {
         onShowPermissionsHelp={() => setShowPermissionsHelp(true)}
       />
 
-      {/* Action Buttons Row */}
+      {/* Main Extraction Section - Solution Principale */}
       {isActive && (
-        <div style={{
-          display: 'flex',
-          gap: '8px',
-          marginTop: '12px'
-        }}>
-          <button
-            onClick={handleTest}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: 'rgba(16, 185, 129, 0.1)',
-              color: '#10b981',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
-              borderRadius: '6px',
-              cursor: 'pointer',
+        <>
+          <div style={{
+            marginTop: '16px',
+            padding: '12px',
+            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
+            borderRadius: '8px'
+          }}>
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '8px', 
+              marginBottom: '8px',
+              fontSize: '13px',
+              fontWeight: '600',
+              color: '#10b981'
+            }}>
+              <Eye size={14} />
+              Extraction AWCS - Prêt à utiliser !
+            </div>
+            <p style={{
+              margin: '0 0 12px 0',
               fontSize: '12px',
-              fontWeight: '500',
+              color: 'rgba(16, 185, 129, 0.8)',
+              lineHeight: '1.4'
+            }}>
+              L'extraction fonctionne parfaitement ! Changez de fenêtre puis cliquez sur un bouton :<br/>
+              <strong>✨ Méthode recommandée : Plus fiable que les raccourcis globaux</strong>
+            </p>
+            
+            <div style={{
               display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-          >
-            <TestTube size={12} />
-            Test Standard
-          </button>
+              gap: '8px'
+            }}>
+              <button
+                onClick={handleTest}
+                style={{
+                  padding: '10px 16px',
+                  backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                  color: '#10b981',
+                  border: '1px solid rgba(16, 185, 129, 0.4)',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <TestTube size={14} />
+                Extraction Intelligente
+              </button>
 
-          <button
-            onClick={handleTestOCR}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: 'rgba(147, 51, 234, 0.1)',
-              color: '#9333ea',
-              border: '1px solid rgba(147, 51, 234, 0.3)',
-              borderRadius: '6px',
-              cursor: 'pointer',
+              <button
+                onClick={handleTestOCR}
+                style={{
+                  padding: '10px 16px',
+                  backgroundColor: 'rgba(147, 51, 234, 0.2)',
+                  color: '#9333ea',
+                  border: '1px solid rgba(147, 51, 234, 0.4)',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <Camera size={14} />
+                OCR Universel
+              </button>
+
+              <button
+                onClick={async () => {
+                  try {
+                    await invoke('awcs_trigger_shortcut');
+                    setTestResult('🧪 Test raccourci déclenché manuellement');
+                  } catch (err) {
+                    setTestResult(`❌ Erreur test: ${err}`);
+                  }
+                }}
+                style={{
+                  padding: '10px 16px',
+                  backgroundColor: 'rgba(251, 191, 36, 0.2)',
+                  color: '#f59e0b',
+                  border: '1px solid rgba(251, 191, 36, 0.4)',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                🧪 Test Raccourci
+              </button>
+            </div>
+            
+            <div style={{
+              marginTop: '10px',
+              padding: '8px',
+              backgroundColor: 'rgba(16, 185, 129, 0.05)',
+              borderRadius: '4px',
+              fontSize: '11px',
+              color: 'rgba(16, 185, 129, 0.7)',
+              lineHeight: '1.3'
+            }}>
+              💡 <strong>Mode d'emploi :</strong> 
+              <br/>• <strong>Extraction Intelligente</strong> : DOM → AppleScript → Accessibility → OCR (pipeline complet)
+              <br/>• <strong>OCR Universel</strong> : Extraction directe par OCR (fonctionne sur toutes les apps)
+            </div>
+          </div>
+
+          {/* Optional Global Shortcuts Section */}
+          <div style={{
+            marginTop: '16px',
+            padding: '12px',
+            backgroundColor: 'rgba(107, 114, 128, 0.05)',
+            border: '1px solid rgba(107, 114, 128, 0.2)',
+            borderRadius: '8px'
+          }}>
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '8px', 
+              marginBottom: '8px',
               fontSize: '12px',
               fontWeight: '500',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-          >
-            <Camera size={12} />
-            Test OCR Direct
-          </button>
+              color: '#6b7280'
+            }}>
+              <Zap size={12} />
+              Raccourci Global (Optionnel)
+            </div>
+            <p style={{
+              margin: '0 0 8px 0',
+              fontSize: '11px',
+              color: '#6b7280',
+              lineHeight: '1.4'
+            }}>
+              Fonctionnalité avancée qui nécessite des permissions spéciales sur macOS :
+            </p>
+
+            <button
+              onClick={handleShortcutToggle}
+              style={{
+                padding: '6px 12px',
+                backgroundColor: shortcutEnabled 
+                  ? 'rgba(16, 185, 129, 0.1)' 
+                  : 'rgba(107, 114, 128, 0.1)',
+                color: shortcutEnabled ? '#10b981' : '#6b7280',
+                border: `1px solid ${shortcutEnabled 
+                  ? 'rgba(16, 185, 129, 0.3)' 
+                  : 'rgba(107, 114, 128, 0.3)'}`,
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: '500',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <Zap size={10} />
+              {shortcutEnabled ? '⌘⇧⌃L Activé' : 'Essayer ⌘⇧⌃L'}
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Phase 4: Global Shortcuts Status */}
+      {isActive && shortcutEnabled && (
+        <div style={{
+          marginTop: '16px',
+          padding: '12px',
+          backgroundColor: 'rgba(16, 185, 129, 0.1)',
+          border: '1px solid rgba(16, 185, 129, 0.3)',
+          borderRadius: '8px',
+          fontSize: '12px',
+          color: '#10b981'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+            <Zap size={14} />
+            <strong>Raccourci Global Actif</strong>
+          </div>
+          <div style={{ marginLeft: '22px', color: 'rgba(16, 185, 129, 0.8)' }}>
+            Pressez <kbd style={{ 
+              padding: '2px 6px', 
+              backgroundColor: 'rgba(16, 185, 129, 0.2)', 
+              borderRadius: '4px',
+              border: '1px solid rgba(16, 185, 129, 0.3)'
+            }}>⌘⇧⌃L</kbd> depuis n'importe quelle application pour déclencher l'extraction AWCS
+            {lastTriggered && (
+              <div style={{ marginTop: '4px', fontSize: '11px' }}>
+                Dernier déclenchement: {lastTriggered.toLocaleTimeString()}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -267,6 +464,86 @@ export const AWCSSection: React.FC = () => {
         </div>
       )}
 
+      {/* Phase 4: Global Shortcuts Error */}
+      {shortcutError && (
+        <div style={{
+          marginTop: '12px',
+          padding: '12px',
+          backgroundColor: 'rgba(239, 68, 68, 0.1)',
+          border: '1px solid rgba(239, 68, 68, 0.3)',
+          borderRadius: '8px',
+          color: '#ef4444'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+            <XCircle size={16} />
+            <strong>Erreur Raccourci Global</strong>
+          </div>
+          <p style={{
+            margin: 0,
+            fontSize: '12px',
+            color: '#fca5a5',
+            lineHeight: '1.4'
+          }}>
+            {shortcutError}
+          </p>
+          {shortcutError?.includes('RegisterEventHotKey failed') && (
+            <div style={{
+              marginTop: '8px',
+              padding: '8px',
+              backgroundColor: 'rgba(251, 191, 36, 0.1)',
+              border: '1px solid rgba(251, 191, 36, 0.3)',
+              borderRadius: '4px',
+              fontSize: '11px',
+              color: '#f59e0b'
+            }}>
+              <strong>💡 Solutions possibles :</strong>
+              <ul style={{ margin: '4px 0', paddingLeft: '16px' }}>
+                <li><strong>1. Permissions d'accessibilité requises :</strong><br/>
+                    Allez dans Préférences Système → Sécurité et confidentialité → Accessibilité<br/>
+                    Ajoutez GRAVIS à la liste des applications autorisées</li>
+                <li><strong>2. Conflit de raccourci :</strong><br/>
+                    Ce raccourci est déjà utilisé par une autre application</li>
+                <li><strong>3. Vérifiez :</strong> Préférences système → Raccourcis clavier</li>
+                <li><strong>4. Alternative :</strong> Utilisez les boutons "Test" ci-dessus en attendant</li>
+              </ul>
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+            <button
+              onClick={() => {
+                // Ouvrir les préférences d'accessibilité
+                invoke('awcs_open_system_preferences');
+              }}
+              style={{
+                padding: '4px 8px',
+                backgroundColor: 'rgba(251, 191, 36, 0.2)',
+                color: '#f59e0b',
+                border: '1px solid rgba(251, 191, 36, 0.3)',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '11px'
+              }}
+            >
+              Ouvrir Préférences
+            </button>
+            <button
+              onClick={() => setShortcutEnabled(false)}
+              style={{
+                padding: '4px 8px',
+                backgroundColor: 'transparent',
+                color: '#fca5a5',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '11px'
+              }}
+            >
+              Fermer
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Permissions Help Modal */}
       {showPermissionsHelp && (
         <PermissionsHelpModal
@@ -312,7 +589,7 @@ const AWCSActivationButton: React.FC<AWCSActivationButtonProps> = ({
         };
       case AWCSActivationState.Active:
         return {
-          text: '⌘⇧G Actif',
+          text: 'AWCS Actif',
           icon: <CheckCircle size={16} />,
           backgroundColor: '#16a34a',
           hoverColor: '#15803d'
@@ -450,17 +727,16 @@ const StatusCard: React.FC<StatusCardProps> = ({
           {statusConfig.title}
         </span>
         {state === AWCSActivationState.Active && (
-          <kbd style={{
-            backgroundColor: 'rgba(255, 255, 255, 0.9)',
-            color: '#1f2937',
+          <span style={{
+            backgroundColor: 'rgba(16, 185, 129, 0.2)',
+            color: '#10b981',
             padding: '2px 6px',
             borderRadius: '4px',
             fontSize: '11px',
-            fontFamily: 'monospace',
             fontWeight: '500'
           }}>
-            {navigator.platform.includes('Mac') ? '⌘⇧G' : 'Ctrl+Shift+G'}
-          </kbd>
+            Prêt
+          </span>
         )}
       </div>
       <div style={{

@@ -21,7 +21,7 @@ use awcs::commands::{
     awcs_get_current_context, awcs_handle_query, awcs_check_permissions, awcs_request_permissions,
     awcs_setup_global_shortcut, awcs_get_state, awcs_set_state, awcs_cleanup, awcs_get_metrics,
     awcs_get_config, awcs_update_config, awcs_open_system_preferences, awcs_show_zone_selector,
-    awcs_trigger_shortcut, awcs_test_extraction, awcs_get_context_ocr_direct
+    awcs_trigger_shortcut, awcs_test_extraction, awcs_get_context_ocr_direct, awcs_get_context_focused_ocr
 };
 use window_commands::{open_rag_storage_window, open_settings_window, open_model_selector_window, open_conversations_window, emit_model_changed, emit_parameters_changed, broadcast_to_window, get_active_windows};
 
@@ -86,6 +86,25 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_shortcuts(["Cmd+Shift+Control+L"])
+                .unwrap()
+                .with_handler(|app, shortcut, event| {
+                    use tauri_plugin_global_shortcut::ShortcutState;
+                    use tauri::Emitter;
+                    
+                    if event.state == ShortcutState::Pressed {
+                        tracing::info!("AWCS Phase 4: Global shortcut triggered! {}", shortcut);
+                        
+                        // Émettre l'événement pour le frontend
+                        if let Err(e) = app.emit("awcs-shortcut-triggered", serde_json::json!({})) {
+                            tracing::error!("Failed to emit shortcut event: {}", e);
+                        }
+                    }
+                })
+                .build()
+        )
         .manage(ocr_state)
         .manage(rag_state)
         .manage(awcs_state)
@@ -132,7 +151,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             awcs_show_zone_selector,
             awcs_trigger_shortcut,
             awcs_test_extraction,
-            awcs_get_context_ocr_direct
+            awcs_get_context_ocr_direct,
+            awcs_get_context_focused_ocr
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -4,6 +4,7 @@
 use super::extractor::ContextExtractor;
 use super::intention_analyzer::IntentionAnalyzer;
 use super::permissions::PermissionsManager;
+use super::global_shortcuts::GlobalShortcutManager; // Phase 4
 use crate::awcs::types::*;
 use std::time::Instant;
 use std::collections::HashMap;
@@ -14,6 +15,7 @@ pub struct AWCSManager {
     extractor: ContextExtractor,
     analyzer: IntentionAnalyzer,
     permissions: PermissionsManager,
+    shortcuts: GlobalShortcutManager, // Phase 4: Raccourcis globaux
     config: AWCSConfig,
     metrics: AWCSMetrics,
 }
@@ -27,6 +29,7 @@ impl AWCSManager {
             extractor: ContextExtractor::new(),
             analyzer: IntentionAnalyzer::new(),
             permissions: PermissionsManager::new(),
+            shortcuts: GlobalShortcutManager::new(), // Phase 4
             config: AWCSConfig::default(),
             metrics: AWCSMetrics::default(),
         }
@@ -105,21 +108,27 @@ impl AWCSManager {
     }
     
     /// Configure le raccourci global
-    pub async fn setup_global_shortcut(&self) -> Result<(), AWCSError> {
-        tracing::info!("Setting up global shortcut: {}", self.config.global_shortcut);
+    pub async fn setup_global_shortcut(&mut self, app_handle: tauri::AppHandle) -> Result<(), AWCSError> {
+        tracing::info!("AWCS Phase 4: Setting up global shortcut: {}", self.config.global_shortcut);
         
-        // TODO: Implémentation du raccourci global avec tauri-plugin-global-shortcut
-        // Pour l'instant, on simule le succès
+        // Enregistrer le raccourci avec le gestionnaire
+        self.shortcuts.register_shortcut(&self.config.global_shortcut, app_handle).await?;
+        
+        tracing::info!("AWCS Phase 4: Global shortcut setup completed");
         Ok(())
     }
     
     /// Nettoie les ressources AWCS
-    pub async fn cleanup(&mut self) -> Result<(), AWCSError> {
-        tracing::info!("Cleaning up AWCS resources");
+    pub async fn cleanup(&mut self, app_handle: tauri::AppHandle) -> Result<(), AWCSError> {
+        tracing::info!("AWCS Phase 4: Cleaning up AWCS resources");
         
-        // TODO: Nettoyer les ressources (raccourcis, caches, etc.)
+        // Désactiver les raccourcis globaux
+        self.shortcuts.unregister_all(app_handle).await?;
+        
+        // Réinitialiser les métriques
         self.metrics = AWCSMetrics::default();
         
+        tracing::info!("AWCS Phase 4: Cleanup completed");
         Ok(())
     }
     

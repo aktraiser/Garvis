@@ -94,9 +94,10 @@ impl ContextExtractor {
             Err(_) => tracing::warn!("Accessibility extraction timed out"),
         }
         
-        // OCR extraction (last resort)
+        // OCR extraction (last resort) - Timeout plus long pour l'OCR
         tracing::info!("AWCS Phase 3 - Attempting extraction with method: OCR (last resort)");
-        match timeout(self.extraction_timeout, self.try_ocr_extraction(&window_info)).await {
+        let ocr_timeout = Duration::from_secs(10); // 10 secondes pour l'OCR
+        match timeout(ocr_timeout, self.try_ocr_extraction(&window_info)).await {
             Ok(Ok(context)) => {
                 if context.confidence.text_completeness > 0.5 {
                     tracing::info!("Extraction successful with ocr: {:.1}% completeness", context.confidence.text_completeness * 100.0);
@@ -106,7 +107,7 @@ impl ContextExtractor {
                 }
             },
             Ok(Err(e)) => tracing::error!("OCR extraction failed: {}", e),
-            Err(_) => tracing::error!("OCR extraction timed out after {} seconds", self.extraction_timeout.as_secs()),
+            Err(_) => tracing::error!("OCR extraction timed out after {} seconds", ocr_timeout.as_secs()),
         }
         
         // Si tous les fallbacks échouent, retourner une enveloppe minimale
