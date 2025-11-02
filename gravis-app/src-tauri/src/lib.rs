@@ -5,6 +5,8 @@
 pub mod rag;
 // Module AWCS (Phase 1 - Core)
 pub mod awcs;
+// Extension server (Phase 0 - Spike)
+mod ext_server;
 // Window management commands
 mod window_commands;
 
@@ -69,7 +71,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .with_max_level(tracing::Level::INFO)
         .init();
 
-    tracing::info!("GRAVIS starting with RAG Module Phase 2 + OCR Integration + AWCS Phase 1");
+    tracing::info!("GRAVIS starting with RAG Module Phase 2 + OCR Integration + AWCS Phase 1 + Extension Server");
 
     // Créer l'état OCR global
     let ocr_state = OcrState::new();
@@ -83,7 +85,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Créer l'état AWCS Phase 2 (incrémental)
     let awcs_state = AWCSState::new();
 
-    tauri::Builder::default()
+    let app_handle = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(
@@ -154,8 +156,21 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             awcs_get_context_ocr_direct,
             awcs_get_context_focused_ocr
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    // Démarrer le serveur extension après que l'app soit prête
+    let app_handle_clone = app_handle.handle().clone();
+    if let Err(e) = ext_server::start_extension_server(app_handle_clone).await {
+        tracing::error!("Failed to start extension server: {}", e);
+    }
+
+    app_handle.run(|_app_handle, event| match event {
+        tauri::RunEvent::ExitRequested { api, .. } => {
+            api.prevent_exit();
+        }
+        _ => {}
+    });
     
     Ok(())
 }

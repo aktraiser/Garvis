@@ -255,6 +255,11 @@ body {
   background: #9333ea;
 }
 
+.model-name-display .status-dot.extracting {
+  background: #3b82f6;
+  animation: pulse 1s infinite;
+}
+
 .model-name-display.clickable {
   transition: all 0.2s ease;
 }

@@ -10,10 +10,10 @@ use tauri::{AppHandle, State, Emitter};
 pub async fn awcs_get_current_context(
     awcs_state: State<'_, AWCSState>,
 ) -> Result<ContextEnvelope, String> {
-    tracing::info!("Command: awcs_get_current_context - Adding 2 second delay for window switch");
+    tracing::info!("Command: awcs_get_current_context - Quick context extraction");
     
-    // Délai de 2 secondes pour permettre de changer de fenêtre après le clic
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+    // Délai réduit à 300ms pour réactivité optimale
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
     
     let manager_arc = awcs_state.manager();
     let mut manager = manager_arc.write().await;
@@ -315,10 +315,10 @@ pub async fn awcs_get_context_ocr_direct(
 pub async fn awcs_get_context_focused_ocr(
     awcs_state: State<'_, AWCSState>,
 ) -> Result<ContextEnvelope, String> {
-    tracing::info!("Command: awcs_get_context_focused_ocr - Focused window OCR mode");
+    tracing::info!("Command: awcs_get_context_focused_ocr - Quick focused OCR");
     
-    // Délai de 2 secondes pour permettre de changer de fenêtre
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+    // Délai réduit à 300ms pour réactivité optimale  
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
     
     // 1. Détection de la fenêtre active
     use crate::awcs::extractors::window_detector::WindowDetector;

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { RagWindow } from './RagWindow';
 import { ModelSelectorWindow } from './ModelSelectorWindow';
 import ReactMarkdown from 'react-markdown';
@@ -42,6 +43,7 @@ export function CommandInterface() {
   const [showSettings, setShowSettings] = useState(false);
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [showRagWindow, setShowRagWindow] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
   
   const openRagWindow = async () => {
     try {
@@ -175,6 +177,74 @@ export function CommandInterface() {
     // TODO: Implement voice input
   };
 
+  // Fonction sécurisée pour ouvrir URLs dans le navigateur externe
+  const openExternalUrl = async (url: string) => {
+    try {
+      console.log(`🌐 Ouverture URL externe avec openUrl: ${url}`);
+      await openUrl(url);
+      console.log('✅ URL ouverte avec succès dans le navigateur externe');
+    } catch (error) {
+      console.error('❌ Erreur openUrl, tentative fallback:', error);
+      try {
+        // Fallback : utiliser window.open avec target _blank
+        window.open(url, '_blank', 'noopener,noreferrer');
+        console.log('✅ Fallback window.open réussi');
+      } catch (fallbackError) {
+        console.error('❌ Fallback window.open échoué:', fallbackError);
+        alert(`Impossible d'ouvrir l'URL: ${url}`);
+      }
+    }
+  };
+
+
+  const handleAWCSExtraction = async (fromGlobalShortcut = false) => {
+    if (isExtracting || isProcessing) return;
+    
+    setIsExtracting(true);
+    
+    try {
+      // Pour le raccourci global, ajouter un petit délai pour permettre le changement de focus
+      if (fromGlobalShortcut) {
+        console.log('🔥 AWCS Phase 4: Extraction déclenchée par raccourci global ⌘⇧⌃L');
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      
+      // Déclencher l'extraction AWCS
+      const context = await invoke('awcs_get_current_context') as any;
+      
+      if (context && context.content && context.content.fulltext) {
+        const extractedText = context.content.fulltext;
+        const appName = context.source.app;
+        const confidence = context.confidence;
+        
+        // Créer un message contextuel avec le contenu extrait
+        const triggerSource = fromGlobalShortcut ? " (via ⌘⇧⌃L)" : "";
+        const contextMessage = `📋 Contenu extrait de ${appName}${triggerSource} (${Math.round(confidence.text_completeness * 100)}% fiable):
+
+"${extractedText}"
+
+Question à propos de ce contenu : `;
+        
+        // Injecter dans l'input du chat
+        setQuery(contextMessage);
+        
+        if (fromGlobalShortcut) {
+          console.log('✅ AWCS Phase 4: Contenu automatiquement injecté dans le chat');
+        }
+      } else {
+        // Si pas de contenu, indiquer l'échec
+        const triggerSource = fromGlobalShortcut ? " (via ⌘⇧⌃L)" : "";
+        setQuery(`❌ Aucun contenu extrait${triggerSource}. Essayez de changer de fenêtre et réessayez.`);
+      }
+    } catch (error) {
+      console.error('Erreur extraction AWCS:', error);
+      const triggerSource = fromGlobalShortcut ? " (via ⌘⇧⌃L)" : "";
+      setQuery(`❌ Erreur d'extraction${triggerSource}: ${error}`);
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
   // Debug useEffect to track states
   useEffect(() => {
     console.log('State update - isThinking:', isThinking, 'thinking length:', thinking?.length || 0, 'isProcessing:', isProcessing, 'clickable condition:', isThinking);
@@ -227,6 +297,116 @@ export function CommandInterface() {
         unlisten();
       }
     };
+  }, []);
+
+  // Listen for global shortcut events (AWCS Phase 4)
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setupGlobalShortcutListener = async () => {
+      try {
+        // Tauri event listener for backend events
+        unlisten = await listen('awcs-shortcut-triggered', async (event: any) => {
+          console.log('🔥 AWCS Phase 4: Global shortcut triggered! Extracting content...', event);
+          
+          // Automatically trigger AWCS extraction when global shortcut is pressed
+          await handleAWCSExtraction(true);
+        });
+        
+        // Custom window event listener for frontend events
+        const handleCustomShortcut = async (event: CustomEvent) => {
+          console.log('🔥 AWCS Phase 4: Custom shortcut event triggered!', event.detail);
+          await handleAWCSExtraction(true);
+        };
+        
+        window.addEventListener('awcs-global-shortcut-triggered', handleCustomShortcut as any);
+        
+        console.log('✅ AWCS Phase 4: Global shortcut listeners setup completed');
+      } catch (error) {
+        console.error('❌ AWCS Phase 4: Failed to setup global shortcut listener:', error);
+      }
+    };
+
+    setupGlobalShortcutListener();
+    
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+      // Clean up custom event listener
+      window.removeEventListener('awcs-global-shortcut-triggered', () => {});
+    };
+  }, []);
+
+  // Listen for browser extension content events
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setupExtensionContentListener = async () => {
+      try {
+        unlisten = await listen('extension-content-received', (event: any) => {
+          console.log('📥 Extension content received:', event.payload);
+          
+          // Show brief extraction indicator
+          setIsExtracting(true);
+          
+          // Inject the formatted content into the chat input
+          if (typeof event.payload === 'string') {
+            setQuery(event.payload);
+          }
+          
+          // Clear extraction indicator after a short delay
+          setTimeout(() => {
+            setIsExtracting(false);
+          }, 500);
+        });
+        
+        console.log('✅ Extension content listener setup completed');
+      } catch (error) {
+        console.error('❌ Failed to setup extension content listener:', error);
+      }
+    };
+
+    setupExtensionContentListener();
+    
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, []);
+
+  // Intercepteur ciblé pour les liens dans les réponses des modèles IA
+  useEffect(() => {
+    const interceptResponseLinks = () => {
+      // Intercepter seulement les clics dans la zone de réponse
+      const handleResponseLinkClick = (e: Event) => {
+        const target = e.target as HTMLElement;
+        const link = target.closest('a') as HTMLAnchorElement;
+        
+        if (link && link.href) {
+          // Vérifier si le lien est dans une zone de contenu assistant
+          const isInAssistantContent = link.closest('.assistant-content, .assistant-message, .conversation-history');
+          
+          // Intercepter seulement les liens externes dans les réponses de l'assistant
+          if (isInAssistantContent && (link.href.startsWith('http://') || link.href.startsWith('https://'))) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('🔗 Lien assistant intercepté, ouverture externe:', link.href);
+            openExternalUrl(link.href);
+          }
+        }
+      };
+
+      // Ajouter l'intercepteur avec capture
+      document.addEventListener('click', handleResponseLinkClick, true);
+
+      return () => {
+        document.removeEventListener('click', handleResponseLinkClick, true);
+      };
+    };
+
+    return interceptResponseLinks();
   }, []);
 
   // Auto-resize window based on conversation content
@@ -553,6 +733,22 @@ export function CommandInterface() {
             </button>
           </div>
         </form>
+        
+        {/* AWCS Global Shortcut Tip */}
+        <div className="shortcut-tip" style={{ 
+          fontSize: '11px', 
+          color: '#666', 
+          textAlign: 'center', 
+          marginTop: '4px',
+          opacity: 0.8
+        }}>
+          💡 Astuce : Utilisez <kbd style={{ 
+            background: '#f0f0f0', 
+            padding: '1px 4px', 
+            borderRadius: '3px',
+            fontSize: '10px' 
+          }}>⌘⇧⌃L</kbd> depuis n'importe quelle app pour extraire du contenu
+        </div>
       </div>
 
       {/* Action buttons */}
@@ -566,7 +762,21 @@ export function CommandInterface() {
           >
             <Plus size={14} />
           </button>
-          <button type="button" className="icon-button" title="Web">
+          <button 
+            type="button" 
+            className="icon-button" 
+            title="Ouvrir une URL dans le navigateur externe"
+            onClick={async () => {
+              const url = prompt('Entrez l\'URL à ouvrir dans le navigateur externe:');
+              if (url) {
+                // Ajouter https:// si pas de protocole
+                const finalUrl = url.startsWith('http://') || url.startsWith('https://') 
+                  ? url 
+                  : `https://${url}`;
+                await openExternalUrl(finalUrl);
+              }
+            }}
+          >
             <Globe size={14} />
           </button>
           <button 
@@ -613,15 +823,17 @@ export function CommandInterface() {
               setShowThinking(!showThinking);
             } : undefined}
             style={{ cursor: isThinking ? 'pointer' : 'default' }}
-            title={isProcessing ? (isThinking ? 'Processing... (click to view thinking)' : 'Processing...') : `Ready - ${currentModel?.name || currentModel?.id}`}
+            title={isExtracting ? 'Extracting content...' : (isProcessing ? (isThinking ? 'Processing... (click to view thinking)' : 'Processing...') : `Ready - ${currentModel?.name || currentModel?.id}`)}
           >
             <div 
-              className={`status-dot ${isProcessing ? (isThinking ? 'thinking' : 'processing') : 'ready'}`}
+              className={`status-dot ${isExtracting ? 'extracting' : (isProcessing ? (isThinking ? 'thinking' : 'processing') : 'ready')}`}
             ></div>
             <span>
-              {isProcessing 
-                ? 'Processing' 
-                : (currentModel?.name || currentModel?.id || 'No Model')
+              {isExtracting
+                ? 'Extracting'
+                : (isProcessing 
+                  ? 'Processing' 
+                  : (currentModel?.name || currentModel?.id || 'No Model'))
               }
             </span>
           </div>
@@ -645,6 +857,30 @@ export function CommandInterface() {
                     <ReactMarkdown 
                       remarkPlugins={[remarkGfm]}
                       rehypePlugins={[rehypeHighlight]}
+                      components={{
+                        a: ({ href, children, ...props }) => {
+                          // Ouvrir les liens externes dans le navigateur
+                          if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
+                            return (
+                              <a 
+                                {...props}
+                                href={href}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  console.log('🔗 Lien ReactMarkdown cliqué:', href);
+                                  openExternalUrl(href);
+                                }}
+                                className="external-link"
+                                title={`Ouvrir dans le navigateur: ${href}`}
+                              >
+                                {children}
+                              </a>
+                            );
+                          }
+                          // Liens internes normaux
+                          return <a {...props} href={href}>{children}</a>;
+                        }
+                      }}
                     >
                       {message.content}
                     </ReactMarkdown>

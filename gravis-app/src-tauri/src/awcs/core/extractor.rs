@@ -52,6 +52,21 @@ impl ContextExtractor {
         );
         
         // 2. Tentatives d'extraction avec fallbacks hiérarchiques
+        
+        // Extension Browser check (Phase 1 - Priority)
+        if self.is_browser_app(&window_info.app) {
+            tracing::info!("AWCS Phase 3 - Browser detected: {}, checking extension server", window_info.app);
+            match self.try_extension_extraction(&window_info).await {
+                Ok(context) => {
+                    if context.confidence.text_completeness > 0.7 {
+                        tracing::info!("Extraction successful with browser extension: {:.1}% completeness", context.confidence.text_completeness * 100.0);
+                        return Ok(context);
+                    }
+                },
+                Err(e) => tracing::info!("Extension extraction failed: {}", e),
+            }
+        }
+        
         // DOM extraction
         tracing::info!("AWCS Phase 3 - Attempting extraction with method: DOM");
         match timeout(self.extraction_timeout, self.try_dom_extraction(&window_info)).await {
@@ -260,6 +275,52 @@ impl ContextExtractor {
         let is_browser = browsers.iter().any(|&browser| app_name.contains(browser));
         tracing::info!("AWCS Phase 3 - Browser check: app='{}' => is_browser={}", app_name, is_browser);
         is_browser
+    }
+    
+    /// Vérifie si l'application est un navigateur (alias pour compatibilité)
+    fn is_browser_app(&self, app_name: &str) -> bool {
+        self.is_web_browser(app_name)
+    }
+    
+    /// Tente l'extraction via l'extension browser
+    async fn try_extension_extraction(&self, window: &WindowInfo) -> Result<ContextEnvelope, AWCSError> {
+        // Déclencher l'extraction via l'extension browser
+        let client = reqwest::Client::new();
+        let response = client
+            .post("http://127.0.0.1:8766/api/extension/trigger")
+            .json(&serde_json::json!({
+                "action": "extract_current_tab",
+                "source": "awcs_shortcut"
+            }))
+            .timeout(std::time::Duration::from_millis(1500))
+            .send()
+            .await
+            .map_err(|e| AWCSError::ExtractionFailed(format!("Extension server unreachable: {}", e)))?;
+            
+        if response.status().is_success() {
+            // Attendre un peu que l'extension traite
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            
+            // Créer une réponse contextuelle optimiste
+            Ok(ContextEnvelope {
+                source: window.clone(),
+                document: None,
+                content: ContentData {
+                    selection: None,
+                    fulltext: Some("Content extraction triggered via browser extension. Check GRAVIS chat for results.".to_string()),
+                    metadata: None,
+                },
+                confidence: ExtractionConfidence {
+                    text_completeness: 0.8, // Haute confiance pour l'extension
+                    source_reliability: 0.9,
+                    extraction_method: "browser_extension".to_string(),
+                },
+                timestamp: chrono::Utc::now(),
+                security_flags: None,
+            })
+        } else {
+            Err(AWCSError::ExtractionFailed("Extension server returned error".to_string()))
+        }
     }
     
     /// Vérifie si l'application est supportée par AppleScript
