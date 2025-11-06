@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
@@ -15,6 +15,7 @@ import {
   FileText,
   Radio, 
   Mic,
+  Send,
   Settings,
   Wifi,
   CheckCircle,
@@ -23,8 +24,6 @@ import {
   Bot,
   Copy,
   Volume2,
-  ThumbsUp,
-  ThumbsDown,
   RotateCcw,
   MessageSquare
 } from "lucide-react";
@@ -35,6 +34,7 @@ import { conversationManager } from "@/lib/conversation-manager";
 export function CommandInterface() {
   const [query, setQuery] = useState("");
   const [isListening, setIsListening] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [response, setResponse] = useState("");
   const [thinking, setThinking] = useState("");
@@ -44,6 +44,7 @@ export function CommandInterface() {
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [showRagWindow, setShowRagWindow] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
+  const [textareaHeight, setTextareaHeight] = useState(20);
   
   const openRagWindow = async () => {
     try {
@@ -409,7 +410,7 @@ Question à propos de ce contenu : `;
     return interceptResponseLinks();
   }, []);
 
-  // Auto-resize window based on conversation content
+  // Auto-resize window based on conversation content and textarea height
   useEffect(() => {
     const resizeWindow = async () => {
       try {
@@ -418,8 +419,11 @@ Question à propos de ce contenu : `;
           // Expand to 400px when there's content
           await window.setSize(new LogicalSize(500, 400));
         } else {
-          // Compact to 130px when no conversation
-          await window.setSize(new LogicalSize(500, 130));
+          // Calculate height based on textarea size
+          const baseHeight = 150; // Base window height
+          const extraHeight = Math.max(0, textareaHeight - 20); // Extra height for textarea expansion
+          const newHeight = baseHeight + extraHeight;
+          await window.setSize(new LogicalSize(500, newHeight));
         }
       } catch (error) {
         console.error('Failed to resize window:', error);
@@ -427,7 +431,7 @@ Question à propos de ce contenu : `;
     };
 
     resizeWindow();
-  }, [conversationHistory.length, isProcessing]);
+  }, [conversationHistory.length, isProcessing, textareaHeight]);
 
   // Helper function to add assistant response to conversation history
   const addAssistantResponse = (content: string, thinkingContent?: string, metrics?: any) => {
@@ -488,6 +492,13 @@ Question à propos de ce contenu : `;
     
     setConversationHistory(prev => [...prev, userMessage]);
     setQuery(""); // Clear input immediately
+    
+    // Reset textarea height to default
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = '20px'; // Default min height
+      setTextareaHeight(20); // Update state
+    }
 
     setIsProcessing(true);
     setResponse("");
@@ -714,23 +725,48 @@ Question à propos de ce contenu : `;
         <div className="drag-handle" data-tauri-drag-region></div>
         <form onSubmit={handleSubmit}>
           <div className="search-input-wrapper">
-            <input
-              type="text"
+            <textarea
+              ref={textareaRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Poser une question"
               className="search-input"
               autoFocus
               disabled={isProcessing}
+              rows={1}
+              style={{
+                resize: 'none',
+                overflow: 'hidden',
+                minHeight: '20px',
+                maxHeight: '120px'
+              }}
+              onInput={(e) => {
+                const target = e.target as HTMLTextAreaElement;
+                target.style.height = 'auto';
+                const newHeight = Math.min(target.scrollHeight, 120);
+                target.style.height = newHeight + 'px';
+                setTextareaHeight(newHeight);
+              }}
             />
-            <button
-              type="button"
-              onClick={handleVoiceInput}
-              className={`mic-button ${isListening ? "listening" : ""}`}
-              title="Microphone"
-            >
-              <Mic size={16} />
-            </button>
+            {!query.trim() ? (
+              <button
+                type="button"
+                onClick={handleVoiceInput}
+                className={`mic-button ${isListening ? "listening" : ""}`}
+                title="Microphone"
+              >
+                <Mic size={16} />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                className="send-button"
+                title="Envoyer"
+                disabled={isProcessing}
+              >
+                <Send size={16} />
+              </button>
+            )}
           </div>
         </form>
         
@@ -738,11 +774,11 @@ Question à propos de ce contenu : `;
         <div className="shortcut-tip" style={{ 
           fontSize: '11px', 
           color: '#666', 
-          textAlign: 'center', 
+          textAlign: 'left', 
           marginTop: '4px',
           opacity: 0.8
         }}>
-          💡 Astuce : Utilisez <kbd style={{ 
+          Astuce : Utilisez <kbd style={{ 
             background: '#f0f0f0', 
             padding: '1px 4px', 
             borderRadius: '3px',
@@ -910,11 +946,6 @@ Question à propos de ce contenu : `;
                             <strong>{(message.metrics.timeToFirstToken / 1000).toFixed(2)}s</strong> <span className="metric-label">to first token</span>
                           </span>
                         )}
-                        {message.metrics.stopReason && (
-                          <span className="metric metric-stop">
-                            <span className="metric-label">Stop reason:</span> <strong>{message.metrics.stopReason}</strong>
-                          </span>
-                        )}
                       </div>
                     </div>
                   )}
@@ -926,12 +957,6 @@ Question à propos de ce contenu : `;
                     </button>
                     <button className="action-btn" title="Audio">
                       <Volume2 size={14} />
-                    </button>
-                    <button className="action-btn" title="J'aime">
-                      <ThumbsUp size={14} />
-                    </button>
-                    <button className="action-btn" title="Je n'aime pas">
-                      <ThumbsDown size={14} />
                     </button>
                     <button className="action-btn" title="Régénérer">
                       <RotateCcw size={14} />
@@ -990,7 +1015,7 @@ Question à propos de ce contenu : `;
         }}>
           <div style={{ maxWidth: '800px', margin: '0 auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h2>🧠 Réflexion du Modèle</h2>
+              <h2>Réflexion du Modèle</h2>
               <button 
                 onClick={() => {
                   console.log('Closing thinking modal');

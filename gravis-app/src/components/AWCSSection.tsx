@@ -36,7 +36,7 @@ export const AWCSSection: React.FC = () => {
   const [shortcutEnabled, setShortcutEnabled] = useState(false);
 
   const handleTest = async () => {
-    setTestResult('⏳ Changez de fenêtre maintenant ! Test dans 2 secondes...');
+    setTestResult('Changez de fenêtre maintenant ! Test dans 2 secondes...');
     
     const context = await testCurrentWindow();
     
@@ -54,7 +54,7 @@ export const AWCSSection: React.FC = () => {
   };
 
   const handleTestOCR = async () => {
-    setTestResult('⏳ Mode OCR Direct - Changez de fenêtre ! Test dans 2 secondes...');
+    setTestResult('Mode OCR Direct - Changez de fenêtre ! Test dans 2 secondes...');
     
     try {
       const context = await invoke('awcs_get_context_ocr_direct') as any;
@@ -140,25 +140,14 @@ export const AWCSSection: React.FC = () => {
         marginBottom: '16px'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <Eye size={20} style={{ color: '#3b82f6' }} />
           <h3 style={{
             fontSize: '18px',
             fontWeight: '600',
             margin: 0,
             color: '#ffffff'
           }}>
-            Active Window Context Service
+            Service de Contexte de Fenêtre Active
           </h3>
-          <span style={{
-            fontSize: '11px',
-            fontWeight: '500',
-            color: '#60a5fa',
-            backgroundColor: 'rgba(59, 130, 246, 0.2)',
-            padding: '2px 6px',
-            borderRadius: '4px'
-          }}>
-            BETA
-          </span>
         </div>
         
         <AWCSActivationButton
@@ -286,7 +275,7 @@ export const AWCSSection: React.FC = () => {
                   gap: '6px'
                 }}
               >
-                🧪 Test Raccourci
+                Test Raccourci
               </button>
             </div>
             

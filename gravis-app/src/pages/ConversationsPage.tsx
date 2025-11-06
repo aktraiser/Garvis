@@ -23,10 +23,21 @@ const ConversationsPage: React.FC = () => {
     // Le presse-papiers est déjà géré dans ConversationsWindow
   };
 
+  const handleCloseWindow = async () => {
+    try {
+      console.log('🚪 Fermeture de la fenêtre conversations via Tauri...');
+      await invoke('close_specific_window', { window_label: 'conversations' });
+      console.log('✅ Fenêtre fermée avec succès');
+    } catch (error) {
+      console.error('❌ Erreur lors de la fermeture:', error);
+    }
+  };
+
   return (
     <ConversationsWindow 
       onResumeConversation={handleResumeConversation}
       onCopyMessage={handleCopyMessage}
+      onClose={handleCloseWindow}
     />
   );
 };

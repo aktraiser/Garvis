@@ -204,16 +204,75 @@ class PopupController {
       throw new Error('Cannot extract from this page type. Please navigate to a regular website (http:// or https://)');
     }
 
-    console.log('🚀 Using inline extraction method to avoid script injection issues');
+    console.log('🧠 Using intelligent extraction method (Phase 1)');
 
-    // Execute extraction in content script using code injection
+    // First inject the intelligent extractor
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: this.currentTab.id },
+        files: ['intelligent-extractor.js']
+      });
+      console.log('✅ Intelligent extractor injected');
+    } catch (error) {
+      console.warn('⚠️ Failed to inject intelligent extractor, falling back to inline:', error);
+    }
+
+    // Execute extraction in content script using intelligent extraction
     const results = await chrome.scripting.executeScript({
       target: { tabId: this.currentTab.id },
       function: function(mode) {
-        console.log('🔍 Running inline extraction, mode:', mode);
+        console.log('🧠 Running intelligent extraction, mode:', mode);
         
         try {
-          // Simple content extraction logic
+          // Use intelligent extractor if available
+          if (typeof window.intelligentExtraction === 'function') {
+            console.log('🔬 Using intelligent extractor');
+            const extractedData = window.intelligentExtraction(mode);
+            
+            console.log('📊 Intelligent extraction result:', {
+              pageType: extractedData.page_type,
+              confidence: extractedData.meta.extraction_confidence,
+              wordCount: extractedData.meta.word_count
+            });
+
+            // Convert to legacy format for background script compatibility
+            const legacyPayload = {
+              url: extractedData.url,
+              title: extractedData.title,
+              mainContent: extractedData.main_text,
+              selectedText: extractedData.page_type === 'user_selection' ? extractedData.main_text : null,
+              extraction_method: 'extension_intelligent', // Normalize for HMAC compatibility
+              metadata: {
+                method: extractedData.meta.extraction_method,
+                contentLength: extractedData.main_text.length,
+                timestamp: Date.now(),
+                // Phase 1 enhancements
+                pageType: extractedData.page_type,
+                confidence: extractedData.meta.extraction_confidence,
+                hasStructuredData: extractedData.meta.has_structured_data,
+                tableCount: extractedData.meta.table_count,
+                structuredData: extractedData.structured,
+                tables: extractedData.tables
+              },
+              timestamp: Date.now()
+            };
+
+            // Send to background script
+            return chrome.runtime.sendMessage({
+              type: 'GRAVIS_EXTRACT',
+              payload: legacyPayload
+            }).then(response => {
+              if (response?.ok) {
+                console.log('✅ Intelligent content sent to GRAVIS successfully');
+                return { ok: true, method: extractedData.meta.extraction_method, contentLength: extractedData.main_text.length };
+              } else {
+                throw new Error(response?.error || 'Failed to send content');
+              }
+            });
+          }
+
+          // Fallback to simple extraction if intelligent extractor not available
+          console.log('⚠️ Intelligent extractor not available, using fallback');
           const selection = window.getSelection()?.toString()?.trim();
           let content, method;
           

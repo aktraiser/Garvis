@@ -25,10 +25,10 @@ interface ConversationsWindowProps {
 }
 
 export const ConversationsWindow: React.FC<ConversationsWindowProps> = ({ onClose, onResumeConversation, onCopyMessage }) => {
+  console.log('🎯 ConversationsWindow props:', { onClose: !!onClose, onResumeConversation: !!onResumeConversation, onCopyMessage: !!onCopyMessage });
+  
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedTag, setSelectedTag] = useState<string>('all');
   
   // Load conversations from localStorage on mount
   useEffect(() => {
@@ -92,20 +92,8 @@ export const ConversationsWindow: React.FC<ConversationsWindowProps> = ({ onClos
     linkElement.click();
   };
 
-  const getAllTags = () => {
-    const tags = new Set<string>();
-    conversations.forEach(conv => {
-      conv.tags.forEach(tag => tags.add(tag));
-    });
-    return Array.from(tags);
-  };
 
-  const filteredConversations = conversations.filter(conv => {
-    const matchesSearch = conv.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         conv.messages.some(msg => msg.content.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchesTag = selectedTag === 'all' || conv.tags.includes(selectedTag);
-    return matchesSearch && matchesTag;
-  });
+  const filteredConversations = conversations;
 
   const formatDate = (date: Date) => {
     return new Intl.DateTimeFormat('fr-FR', {
@@ -129,13 +117,12 @@ export const ConversationsWindow: React.FC<ConversationsWindowProps> = ({ onClos
     }
   };
 
-  const handleResumeConversation = (conversation: Conversation) => {
+  const handleResumeConversation = async (conversation: Conversation) => {
+    console.log('🔄 Démarrage reprise conversation:', conversation.title);
+    
     if (onResumeConversation) {
       onResumeConversation(conversation);
-    }
-    // Fermer la fenêtre après reprise
-    if (onClose) {
-      onClose();
+      console.log('✅ Callback onResumeConversation appelé');
     }
   };
 
@@ -172,21 +159,6 @@ export const ConversationsWindow: React.FC<ConversationsWindowProps> = ({ onClos
             {conversations.length} conversations
           </span>
         </div>
-        {onClose && (
-          <button
-            onClick={onClose}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#9ca3af',
-              cursor: 'pointer',
-              fontSize: '18px',
-              padding: '8px'
-            }}
-          >
-            ✕
-          </button>
-        )}
       </div>
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
@@ -197,44 +169,6 @@ export const ConversationsWindow: React.FC<ConversationsWindowProps> = ({ onClos
           display: 'flex',
           flexDirection: 'column'
         }}>
-          {/* Search and filters */}
-          <div style={{ padding: '16px' }}>
-            <div style={{ marginBottom: '12px' }}>
-              <input
-                type="text"
-                placeholder="Rechercher dans les conversations..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '8px 12px',
-                  borderRadius: '6px',
-                  border: '1px solid rgba(255, 255, 255, 0.2)',
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  color: '#ffffff',
-                  fontSize: '14px'
-                }}
-              />
-            </div>
-            <select
-              value={selectedTag}
-              onChange={(e) => setSelectedTag(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                borderRadius: '6px',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-                background: 'rgba(255, 255, 255, 0.05)',
-                color: '#ffffff',
-                fontSize: '14px'
-              }}
-            >
-              <option value="all">Tous les tags</option>
-              {getAllTags().map(tag => (
-                <option key={tag} value={tag}>{tag}</option>
-              ))}
-            </select>
-          </div>
 
           {/* Conversations list */}
           <div style={{ flex: 1, overflow: 'auto' }}>
@@ -247,14 +181,17 @@ export const ConversationsWindow: React.FC<ConversationsWindowProps> = ({ onClos
                 <MessageSquare size={48} style={{ marginBottom: '16px', opacity: 0.5 }} />
                 <p style={{ margin: 0, fontSize: '16px' }}>Aucune conversation trouvée</p>
                 <p style={{ margin: '8px 0 0 0', fontSize: '14px' }}>
-                  {searchQuery ? 'Essayez avec d\'autres termes de recherche' : 'Démarrez une conversation pour la voir apparaître ici'}
+                  Démarrez une conversation pour la voir apparaître ici
                 </p>
               </div>
             ) : (
               filteredConversations.map((conversation) => (
                 <div
                   key={conversation.id}
-                  onClick={() => setSelectedConversation(conversation)}
+                  onClick={() => {
+                    setSelectedConversation(conversation);
+                    handleResumeConversation(conversation);
+                  }}
                   style={{
                     padding: '12px 16px',
                     borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
@@ -400,7 +337,24 @@ export const ConversationsWindow: React.FC<ConversationsWindowProps> = ({ onClos
                 {/* Actions */}
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button
-                    onClick={() => handleResumeConversation(selectedConversation)}
+                    onClick={async () => {
+                      console.log('🖱️ Bouton Reprendre cliqué!', selectedConversation?.title);
+                      
+                      // Reprendre la conversation
+                      if (selectedConversation && onResumeConversation) {
+                        onResumeConversation(selectedConversation);
+                      }
+                      
+                      // Fermer la fenêtre immédiatement
+                      try {
+                        const { invoke } = await import('@tauri-apps/api/core');
+                        console.log('🚪 Tentative de fermeture...');
+                        await invoke('close_specific_window', { window_label: 'conversations' });
+                        console.log('✅ Commande de fermeture envoyée');
+                      } catch (error) {
+                        console.error('❌ Erreur fermeture:', error);
+                      }
+                    }}
                     style={{
                       background: 'rgba(34, 197, 94, 0.1)',
                       border: '1px solid rgba(34, 197, 94, 0.3)',
@@ -501,29 +455,22 @@ export const ConversationsWindow: React.FC<ConversationsWindowProps> = ({ onClos
                       </div>
                       <div style={{
                         display: 'flex',
-                        justifyContent: 'space-between',
+                        justifyContent: 'flex-start',
                         alignItems: 'center',
                         marginTop: '8px'
                       }}>
-                        <div style={{
-                          fontSize: '11px',
-                          color: '#9ca3af'
-                        }}>
-                          {formatDate(message.timestamp)}
-                        </div>
                         <button
                           onClick={() => handleCopyMessage(message.content)}
                           style={{
                             background: 'rgba(255, 255, 255, 0.1)',
                             border: '1px solid rgba(255, 255, 255, 0.2)',
                             color: '#9ca3af',
-                            padding: '4px 8px',
+                            padding: '6px',
                             borderRadius: '4px',
-                            fontSize: '12px',
                             cursor: 'pointer',
                             display: 'flex',
                             alignItems: 'center',
-                            gap: '4px',
+                            justifyContent: 'center',
                             opacity: 0.7
                           }}
                           title="Copier ce message"
@@ -537,7 +484,6 @@ export const ConversationsWindow: React.FC<ConversationsWindowProps> = ({ onClos
                           }}
                         >
                           <Copy size={12} />
-                          Copier
                         </button>
                       </div>
                     </div>

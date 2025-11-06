@@ -119,7 +119,7 @@ export const ConnectionsTab: React.FC = () => {
             color: '#ffffff',
             marginBottom: '8px'
           }}>
-            🔗 Connexions LiteLLM
+            Connexions LiteLLM
           </h2>
           <p style={{ 
             color: '#9ca3af',

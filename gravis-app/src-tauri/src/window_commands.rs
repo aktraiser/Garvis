@@ -59,9 +59,12 @@ pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {
     .min_inner_size(600.0, 500.0)
     .resizable(true)
     .center()
+    .always_on_top(true)
     .build() {
-        Ok(_) => {
+        Ok(window) => {
             tracing::info!("Settings window created successfully");
+            // Donner le focus à la nouvelle fenêtre
+            let _ = window.set_focus();
             Ok(())
         },
         Err(e) => {
@@ -94,9 +97,12 @@ pub async fn open_model_selector_window(app: AppHandle) -> Result<(), String> {
     .min_inner_size(500.0, 400.0)
     .resizable(true)
     .center()
+    .always_on_top(true)
     .build() {
-        Ok(_) => {
+        Ok(window) => {
             tracing::info!("Model Selector window created successfully");
+            // Donner le focus à la nouvelle fenêtre
+            let _ = window.set_focus();
             Ok(())
         },
         Err(e) => {
@@ -129,9 +135,12 @@ pub async fn open_conversations_window(app: AppHandle) -> Result<(), String> {
     .min_inner_size(800.0, 600.0)
     .resizable(true)
     .center()
+    .always_on_top(true)
     .build() {
-        Ok(_) => {
+        Ok(window) => {
             tracing::info!("Conversations window created successfully");
+            // Donner le focus à la nouvelle fenêtre
+            let _ = window.set_focus();
             Ok(())
         },
         Err(e) => {
@@ -217,4 +226,19 @@ pub async fn get_active_windows(app: AppHandle) -> Result<Vec<String>, String> {
     
     tracing::info!("Active windows: {:?}", active_windows);
     Ok(active_windows)
+}
+
+#[tauri::command]
+pub async fn close_specific_window(app: AppHandle, window_label: String) -> Result<(), String> {
+    tracing::info!("Attempting to close window: {}", window_label);
+    
+    if let Some(window) = app.get_webview_window(&window_label) {
+        window.close().map_err(|e| format!("Failed to close window '{}': {}", window_label, e))?;
+        tracing::info!("Successfully closed window: {}", window_label);
+        Ok(())
+    } else {
+        let error_msg = format!("Window '{}' not found", window_label);
+        tracing::warn!("{}", error_msg);
+        Err(error_msg)
+    }
 }

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "gravis-app",
-  "version": "0.1.0",
-  "identifier": "com.lucasbometon.gravis-app",
+  "productName": "GRAVIS",
+  "version": "0.1.1",
+  "identifier": "com.lucasbometon.gravis",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
       {
         "title": "GRAVIS",
         "width": 500,
-        "height": 130,
+        "height": 160,
         "resizable": true,
         "decorations": false,
         "transparent": true,

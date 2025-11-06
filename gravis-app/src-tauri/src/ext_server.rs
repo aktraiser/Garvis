@@ -281,6 +281,151 @@ struct PingResponse {
     message: Option<String>,
 }
 
+/// Format content intelligently based on extraction data (Phase 1)
+fn format_content_intelligently(payload: &SecureExtractedContent, extraction_source: &str) -> String {
+    // Try to parse metadata for intelligent formatting
+    let _metadata = if let Some(metadata_str) = payload.main_content.lines().last() {
+        if metadata_str.starts_with("METADATA:") {
+            serde_json::from_str::<serde_json::Value>(&metadata_str[9..]).ok()
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Detect page type from extraction method and content
+    let page_type = extract_page_type(&payload.extraction_method, &payload.main_content);
+    
+    match page_type.as_str() {
+        "commerce" => format_commerce_content(payload, extraction_source),
+        "article" => format_article_content(payload, extraction_source),
+        "table_dataset" => format_table_content(payload, extraction_source),
+        "email_like" => format_email_content(payload, extraction_source),
+        _ => format_generic_content(payload, extraction_source)
+    }
+}
+
+fn extract_page_type(extraction_method: &str, content: &str) -> String {
+    // For Phase 1, we'll try to detect from content since extraction_method is normalized
+    // TODO: Parse metadata to get the actual detected page type
+    if extraction_method.contains("commerce") {
+        "commerce".to_string()
+    } else if extraction_method.contains("article") {
+        "article".to_string()
+    } else if extraction_method.contains("table") {
+        "table_dataset".to_string()
+    } else if extraction_method.contains("email") {
+        "email_like".to_string()
+    } else if extraction_method.contains("intelligent") {
+        // For intelligent extraction, we'll detect from content patterns
+        detect_content_type_from_text(content)
+    } else {
+        "generic".to_string()
+    }
+}
+
+fn detect_content_type_from_text(content: &str) -> String {
+    let content_lower = content.to_lowercase();
+    
+    // Commerce detection
+    if content_lower.contains("€") || content_lower.contains("$") || 
+       content_lower.contains("prix") || content_lower.contains("price") ||
+       content_lower.contains("tarif") || content_lower.contains("cost") {
+        return "commerce".to_string();
+    }
+    
+    // Article detection  
+    if content_lower.contains("article") || content_lower.contains("author") ||
+       content_lower.contains("published") || content_lower.contains("news") {
+        return "article".to_string();
+    }
+    
+    "generic".to_string()
+}
+
+fn format_commerce_content(payload: &SecureExtractedContent, extraction_source: &str) -> String {
+    // Extract price information from content
+    let prices = extract_prices_from_content(&payload.main_content);
+    
+    let mut formatted = format!(
+        "{} extrait de **{}**\n🔗 {}\n\n",
+        extraction_source, payload.title, payload.url
+    );
+
+    if !prices.is_empty() {
+        formatted.push_str("💰 **PRIX DÉTECTÉS:**\n");
+        for price in prices.iter().take(5) {
+            formatted.push_str(&format!("• {}\n", price));
+        }
+        formatted.push('\n');
+    }
+
+    formatted.push_str(&format!("📄 **CONTENU:**\n{}\n\n", payload.main_content));
+    formatted.push_str("**MISSION:** Analyse ces informations commerciales. Identifie les meilleurs prix, compare les offres, et donne des conseils d'achat concrets basés sur les données extraites.");
+    
+    formatted
+}
+
+fn format_article_content(payload: &SecureExtractedContent, extraction_source: &str) -> String {
+    format!(
+        "{} extrait de **{}**\n🔗 {}\n\n📰 **ARTICLE:**\n{}\n\n**MISSION:** Résume cet article en 5 points clés, extrais 3 citations importantes, et génère 3 questions critiques pour approfondir le sujet.",
+        extraction_source, payload.title, payload.url, payload.main_content
+    )
+}
+
+fn format_table_content(payload: &SecureExtractedContent, extraction_source: &str) -> String {
+    format!(
+        "{} extrait de **{}**\n🔗 {}\n\n📊 **DONNÉES TABULAIRES:**\n{}\n\n**MISSION:** Analyse ces données structurées. Identifie 3 insights clés, détecte 2 valeurs aberrantes potentielles, et propose une synthèse actionnable.",
+        extraction_source, payload.title, payload.url, payload.main_content
+    )
+}
+
+fn format_email_content(payload: &SecureExtractedContent, extraction_source: &str) -> String {
+    format!(
+        "{} extrait de **{}**\n🔗 {}\n\n📧 **CONTENU EMAIL/MESSAGE:**\n{}\n\n**MISSION:** Résume ce message, extrais les action items et deadlines, identifie les contacts importants et propose un plan de suivi.",
+        extraction_source, payload.title, payload.url, payload.main_content
+    )
+}
+
+fn format_generic_content(payload: &SecureExtractedContent, extraction_source: &str) -> String {
+    format!(
+        "{} extrait de **{}**\n🔗 {}\n\n{}\n\n**Question à propos de ce contenu :** ",
+        extraction_source, payload.title, payload.url, payload.main_content
+    )
+}
+
+fn extract_prices_from_content(content: &str) -> Vec<String> {
+    use regex::Regex;
+    
+    let mut prices = Vec::new();
+    
+    // Regex patterns for different price formats
+    let patterns = [
+        r"(\d+[,.]?\d*)\s*€", // Euro
+        r"(\d+[,.]?\d*)\s*\$", // Dollar
+        r"(\d+[,.]?\d*)\s*£", // Pound
+        r"(\d+[,.]?\d*)\s*(EUR|USD|GBP)", // Currency codes
+        r"(?i)(à partir de|from|starting at)\s+(\d+[,.]?\d*)\s*[€$£]", // Starting from
+        r"(?i)(prix|price|tarif|cost)[\s:]+(\d+[,.]?\d*)\s*[€$£]", // Price labels
+    ];
+    
+    for pattern in &patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            for cap in re.captures_iter(content) {
+                if let Some(price_match) = cap.get(0) {
+                    let price_text = price_match.as_str();
+                    if !prices.contains(&price_text.to_string()) {
+                        prices.push(price_text.to_string());
+                    }
+                }
+            }
+        }
+    }
+    
+    prices
+}
+
 /// Handler pour déclencher l'extraction depuis AWCS
 async fn handle_extension_trigger(
     Json(payload): Json<serde_json::Value>
@@ -382,7 +527,8 @@ async fn handle_extension_content_raw(
     });
     let canonical_body = canonical_payload.to_string();
     
-    tracing::info!("🔍 DEBUG - Server canonical payload: {}", &canonical_body[..200.min(canonical_body.len())]);
+    tracing::info!("🔍 DEBUG - Server canonical payload: {}", 
+                   canonical_body.chars().take(200).collect::<String>());
     
     // Validation HMAC avec le body canonique
     if !security.verify_signature_raw(&canonical_body, &signature) {
@@ -418,16 +564,8 @@ async fn handle_extension_content_common(
         "🌐 Page"
     };
 
-    // Analyse intelligente du contenu pour extraction structurée
-    let structured_data = extract_structured_data(&payload.main_content, &payload.url);
-    
-    let formatted = format_content_with_intelligence(
-        extraction_source,
-        &payload.title,
-        &payload.url,
-        &payload.main_content,
-        &structured_data
-    );
+    // Phase 1: Template intelligent adaptatif basé sur les données extraites
+    let formatted = format_content_intelligently(&payload, extraction_source);
 
     tracing::info!("📄 Content formatted: {} chars from {}", 
                    formatted.len(), payload.extraction_method);

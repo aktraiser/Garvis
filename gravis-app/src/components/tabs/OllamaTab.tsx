@@ -91,7 +91,7 @@ export const OllamaTab: React.FC = () => {
               fontWeight: '500'
             }}
           >
-            📥 Télécharger Ollama
+            Télécharger Ollama
           </a>
         </div>
       ) : (
@@ -130,7 +130,7 @@ export const OllamaTab: React.FC = () => {
                 fontSize: '18px',
                 fontWeight: '500'
               }}>
-                🏠 Modèles installés ({models.length})
+                Modèles installés ({models.length})
               </h3>
               <div style={{
                 background: 'rgba(34, 197, 94, 0.1)',
@@ -280,7 +280,7 @@ export const OllamaTab: React.FC = () => {
                               cursor: 'pointer'
                             }}
                           >
-                            🗑️ Supprimer
+                            Supprimer
                           </button>
                         </td>
                       </tr>
@@ -299,7 +299,7 @@ export const OllamaTab: React.FC = () => {
               fontSize: '18px',
               fontWeight: '500'
             }}>
-              📥 Modèles disponibles au téléchargement
+              Modèles disponibles au téléchargement
             </h3>
             <div style={{
               background: 'rgba(255, 255, 255, 0.05)',
@@ -485,7 +485,7 @@ export const OllamaTab: React.FC = () => {
                               opacity: isInstalled ? 0.6 : 1
                             }}
                           >
-                            {isInstalled ? 'Installé' : isDownloading ? 'En cours...' : '📥 Télécharger'}
+                            {isInstalled ? 'Installé' : isDownloading ? 'En cours...' : 'Télécharger'}
                           </button>
                         </td>
                       </tr>

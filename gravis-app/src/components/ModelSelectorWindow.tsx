@@ -17,7 +17,7 @@ export const ModelSelectorWindow: React.FC<ModelSelectorWindowProps> = ({ onClos
   const [modelSources, setModelSources] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [selectedModel, setSelectedModel] = useState(modelConfigStore.currentModel.id);
+  const [selectedModel, setSelectedModel] = useState('');
   
   // États pour l'interface
   const [activeTab, setActiveTab] = useState<TabType>('models');
@@ -183,86 +183,73 @@ export const ModelSelectorWindow: React.FC<ModelSelectorWindowProps> = ({ onClos
         <div style={{ 
           background: 'linear-gradient(90deg, #1e293b 0%, #334155 100%)',
           borderBottom: '1px solid #475569',
-          padding: '16px 24px',
+          padding: '16px 24px 0 24px',
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'end',
           justifyContent: 'space-between',
           position: 'sticky',
           top: 0,
           zIndex: 10,
           flexShrink: 0
         }}>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '2px', marginBottom: '-1px' }}>
             <button
               onClick={() => setActiveTab('models')}
               style={{
-                padding: '12px 24px',
+                padding: '12px 24px 16px 24px',
                 background: activeTab === 'models' 
-                  ? 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' 
-                  : 'transparent',
-                color: activeTab === 'models' ? '#ffffff' : '#94a3b8',
-                border: activeTab === 'models' 
-                  ? '1px solid #3b82f6' 
-                  : '1px solid transparent',
-                borderRadius: '8px',
+                  ? 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)' 
+                  : 'linear-gradient(135deg, #374151 0%, #4b5563 100%)',
+                color: activeTab === 'models' ? '#ffffff' : '#d1d5db',
+                border: '1px solid #475569',
+                borderBottom: activeTab === 'models' ? '1px solid #0f172a' : '1px solid #475569',
+                borderTopLeftRadius: '12px',
+                borderTopRightRadius: '12px',
+                borderBottomLeftRadius: '0',
+                borderBottomRightRadius: '0',
                 cursor: 'pointer',
                 fontSize: '14px',
                 fontWeight: '500',
-                transition: 'all 0.2s ease'
+                transition: 'all 0.2s ease',
+                position: 'relative',
+                zIndex: activeTab === 'models' ? 2 : 1,
+                boxShadow: activeTab === 'models' 
+                  ? '0 -2px 8px rgba(0, 0, 0, 0.3)' 
+                  : '0 2px 4px rgba(0, 0, 0, 0.1)'
               }}
             >
-              🤖 Modèles
+              Modèles
             </button>
             <button
               onClick={() => setActiveTab('parameters')}
               disabled={!selectedModel}
               style={{
-                padding: '12px 24px',
+                padding: '12px 24px 16px 24px',
                 background: activeTab === 'parameters' 
-                  ? 'linear-gradient(135deg, #10b981 0%, #047857 100%)' 
-                  : 'transparent',
-                color: activeTab === 'parameters' ? '#ffffff' : selectedModel ? '#94a3b8' : '#6b7280',
-                border: activeTab === 'parameters' 
-                  ? '1px solid #10b981' 
-                  : '1px solid transparent',
-                borderRadius: '8px',
+                  ? 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)' 
+                  : 'linear-gradient(135deg, #374151 0%, #4b5563 100%)',
+                color: activeTab === 'parameters' ? '#ffffff' : selectedModel ? '#d1d5db' : '#6b7280',
+                border: '1px solid #475569',
+                borderBottom: activeTab === 'parameters' ? '1px solid #0f172a' : '1px solid #475569',
+                borderTopLeftRadius: '12px',
+                borderTopRightRadius: '12px',
+                borderBottomLeftRadius: '0',
+                borderBottomRightRadius: '0',
                 cursor: selectedModel ? 'pointer' : 'not-allowed',
                 fontSize: '14px',
                 fontWeight: '500',
                 transition: 'all 0.2s ease',
+                position: 'relative',
+                zIndex: activeTab === 'parameters' ? 2 : 1,
+                boxShadow: activeTab === 'parameters' 
+                  ? '0 -2px 8px rgba(0, 0, 0, 0.3)' 
+                  : '0 2px 4px rgba(0, 0, 0, 0.1)',
                 opacity: selectedModel ? 1 : 0.5
               }}
             >
-              ⚙️ Paramètres
+              Paramètres
             </button>
           </div>
-          
-          <button
-            onClick={onClose}
-            style={{
-              padding: '8px 16px',
-              background: 'transparent',
-              color: '#94a3b8',
-              border: '1px solid #475569',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: '500',
-              transition: 'all 0.2s ease'
-            }}
-            onMouseOver={(e) => {
-              e.currentTarget.style.background = '#dc2626';
-              e.currentTarget.style.color = '#ffffff';
-              e.currentTarget.style.borderColor = '#dc2626';
-            }}
-            onMouseOut={(e) => {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = '#94a3b8';
-              e.currentTarget.style.borderColor = '#475569';
-            }}
-          >
-            ✕ Fermer
-          </button>
         </div>
 
         {/* Contenu des onglets - Scrollable */}
@@ -286,6 +273,7 @@ export const ModelSelectorWindow: React.FC<ModelSelectorWindowProps> = ({ onClos
           ) : (
             <ParametersTab
               selectedModel={selectedModel}
+              availableModels={availableModels}
               modelParameters={modelParameters}
               setModelParameters={setModelParameters}
               onSave={handleParametersSave}

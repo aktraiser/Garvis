@@ -160,8 +160,35 @@ impl DocumentProcessor {
             }
         }
         
-        // Assertion E2E: pas de document sans chunks après tous les fallbacks
-        assert!(!chunks.is_empty(), "E2E CRITICAL: expected >0 chunks after all fallbacks for {:?}", file_path);
+        // GARDE-FOU ULTIME: Si vraiment aucun chunk après tous les fallbacks, créer un chunk d'erreur
+        if chunks.is_empty() {
+            tracing::error!("E2E CRITICAL: expected >0 chunks after all fallbacks for {:?}", file_path);
+            tracing::warn!("Creating emergency fallback chunk to prevent crash");
+            
+            // Créer un chunk d'urgence pour éviter la panique
+            let emergency_chunk = EnrichedChunk {
+                id: format!("chunk_{}_emergency", uuid::Uuid::new_v4().simple()),
+                content: format!("EXTRACTION FAILED: No text could be extracted from {}", file_path.file_name().unwrap_or_default().to_string_lossy()),
+                start_line: 0,
+                end_line: 1,
+                chunk_type: ChunkType::TextBlock,
+                embedding: None,
+                hash: String::new(),
+                metadata: ChunkMetadata {
+                    tags: vec!["extraction_failed".to_string(), "emergency".to_string()],
+                    priority: Priority::Low,
+                    language: "unknown".to_string(),
+                    symbol: None,
+                    context: None,
+                    confidence: 0.0,
+                    ocr_metadata: None,
+                    source_type: SourceType::NativeText,
+                    extraction_method: ExtractionMethod::DirectRead,
+                },
+                group_id: group_id.to_string(),
+            };
+            chunks.push(emergency_chunk);
+        }
 
         // 5. Construction du document enrichi
         let document_id = format!("doc_{}", uuid::Uuid::new_v4().simple());
@@ -225,32 +252,34 @@ impl DocumentProcessor {
         let result = extractor.extract_pdf_text(path).await
             .map_err(|e| anyhow::anyhow!("PDF extraction failed: {}", e))?;
         
+        // Si aucun texte extrait, retourner une erreur pour déclencher le fallback OCR
+        if result.text.trim().is_empty() || result.token_count == 0 {
+            warn!("PDF native extraction returned empty text, will trigger OCR fallback");
+            return Err(anyhow::anyhow!("No native text extracted from PDF"));
+        }
+
         // Estimer la qualité du texte extrait - amélioration pour détection native
         let quality_ratio = if result.text.len() > 200 {
             let _word_count = result.text.split_whitespace().count();
             let alpha_count = result.text.chars().filter(|c| c.is_alphabetic()).count();
             let printable_count = result.text.chars().filter(|c| c.is_ascii_graphic() || c.is_whitespace()).count();
-            
-            if result.text.len() > 0 {
-                let alpha_ratio = alpha_count as f32 / result.text.len() as f32;
-                let printable_ratio = printable_count as f32 / result.text.len() as f32;
-                
-                // Si ratio printable > 0.9 et beaucoup de texte → texte natif de qualité
-                if printable_ratio > 0.9 && result.text.len() > 1000 {
-                    1.0  // Parfait pour texte natif
-                } else {
-                    (alpha_ratio * 1.2).min(1.0)
-                }
+
+            let alpha_ratio = alpha_count as f32 / result.text.len() as f32;
+            let printable_ratio = printable_count as f32 / result.text.len() as f32;
+
+            // Si ratio printable > 0.9 et beaucoup de texte → texte natif de qualité
+            if printable_ratio > 0.9 && result.text.len() > 1000 {
+                1.0  // Parfait pour texte natif
             } else {
-                0.0
+                (alpha_ratio * 1.2).min(1.0)
             }
         } else {
-            0.1 // Texte trop court, qualité faible
+            0.3 // Texte court mais présent
         };
-        
-        debug!("PDF native extraction: {} chars, quality={:.2}", 
+
+        debug!("PDF native extraction: {} chars, quality={:.2}",
                result.text.len(), quality_ratio);
-        
+
         Ok((result.text, quality_ratio))
     }
 

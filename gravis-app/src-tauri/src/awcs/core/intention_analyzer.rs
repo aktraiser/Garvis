@@ -196,7 +196,7 @@ impl IntentionAnalyzer {
     }
     
     /// Planifie la stratégie d'exécution
-    fn plan_execution_strategy(&self, classification: &IntentionClassification, context: &ContextEnvelope) -> ExecutionStrategy {
+    fn plan_execution_strategy(&self, classification: &IntentionClassification, _context: &ContextEnvelope) -> ExecutionStrategy {
         match classification.intention_type {
             IntentionType::Summary => ExecutionStrategy {
                 approach: "Local LLM summarization".to_string(),

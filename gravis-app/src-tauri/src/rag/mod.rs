@@ -274,7 +274,24 @@ impl DocumentGroup {
     pub fn new(name: String) -> Self {
         let id = format!("group_{}", uuid::Uuid::new_v4().simple());
         let now = SystemTime::now();
-        
+
+        Self {
+            id: id.clone(),
+            name,
+            active: true,
+            chunk_config: ChunkConfig::default(),
+            metadata_config: MetadataConfig::default(),
+            documents: Vec::new(),
+            qdrant_collection: format!("collection_{}", id),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// Créer un nouveau groupe avec un ID spécifique (pour groupes prédéfinis comme "default_group")
+    pub fn new_with_id(id: String, name: String) -> Self {
+        let now = SystemTime::now();
+
         Self {
             id: id.clone(),
             name,
@@ -341,6 +358,9 @@ mod tests {
                 symbol: None,
                 context: None,
                 confidence: 1.0,
+                ocr_metadata: None,
+                source_type: SourceType::NativeText,
+                extraction_method: ExtractionMethod::DirectRead,
             },
             group_id: "group1".to_string(),
         };

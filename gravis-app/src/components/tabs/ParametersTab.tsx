@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CheckCircle } from 'lucide-react';
+import { AVAILABLE_MODELS } from '@/lib/litellm';
 
 export interface ModelParameters {
   temperature: number;
@@ -12,6 +12,7 @@ export interface ModelParameters {
 
 interface ParametersTabProps {
   selectedModel: string;
+  availableModels: any[];
   modelParameters: ModelParameters;
   setModelParameters: (params: ModelParameters) => void;
   onSave: () => void;
@@ -19,12 +20,37 @@ interface ParametersTabProps {
 
 export const ParametersTab: React.FC<ParametersTabProps> = ({ 
   selectedModel, 
+  availableModels,
   modelParameters, 
   setModelParameters, 
   onSave 
 }) => {
   // États locaux pour une réactivité immédiate
   const [localParameters, setLocalParameters] = useState(modelParameters);
+  const [selectedModelName, setSelectedModelName] = useState('');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  
+  // Trouve le nom du modèle sélectionné
+  const getSelectedModelName = () => {
+    if (!selectedModel) {
+      return "aucun modèle sélectionné";
+    }
+    
+    // Chercher d'abord dans les modèles disponibles
+    let foundModel = availableModels.find(m => m.id === selectedModel);
+    
+    // Si pas trouvé, chercher dans AVAILABLE_MODELS
+    if (!foundModel) {
+      foundModel = AVAILABLE_MODELS.find(m => m.id === selectedModel);
+    }
+    
+    return foundModel ? (foundModel.name || foundModel.id) : selectedModel;
+  };
+  
+  // Mettre à jour le nom du modèle quand selectedModel change
+  useEffect(() => {
+    setSelectedModelName(getSelectedModelName());
+  }, [selectedModel, availableModels]);
 
   // Synchroniser avec les props quand elles changent
   useEffect(() => {
@@ -40,11 +66,30 @@ export const ParametersTab: React.FC<ParametersTabProps> = ({
     setModelParameters(newParameters);
   };
 
-  const handleSaveClick = () => {
+  const handleSaveClick = async () => {
     console.log('🔧 ParametersTab handleSaveClick called!');
     console.log('🔧 Current localParameters:', localParameters);
     console.log('🔧 Current modelParameters prop:', modelParameters);
-    onSave();
+    
+    setSaveStatus('saving');
+    
+    try {
+      await onSave();
+      setSaveStatus('success');
+      
+      // Réinitialiser le statut après 2 secondes
+      setTimeout(() => {
+        setSaveStatus('idle');
+      }, 2000);
+    } catch (error) {
+      setSaveStatus('error');
+      console.error('Erreur lors de la sauvegarde:', error);
+      
+      // Réinitialiser le statut après 3 secondes
+      setTimeout(() => {
+        setSaveStatus('idle');
+      }, 3000);
+    }
   };
 
   return (
@@ -86,7 +131,7 @@ export const ParametersTab: React.FC<ParametersTabProps> = ({
               margin: 0,
               fontSize: '14px'
             }}>
-              Configuration pour: <span style={{ color: '#60a5fa', fontWeight: '500' }}>{selectedModel}</span>
+              Configuration pour: <span style={{ color: '#60a5fa', fontWeight: '500' }}>{selectedModelName}</span>
             </p>
           </div>
         </div>
@@ -399,31 +444,45 @@ export const ParametersTab: React.FC<ParametersTabProps> = ({
         }}>
           <button 
             onClick={handleSaveClick}
+            disabled={saveStatus === 'saving'}
             style={{
               padding: '12px 24px',
-              background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+              background: saveStatus === 'success' 
+                ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+                : saveStatus === 'error'
+                ? 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)'
+                : saveStatus === 'saving'
+                ? 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)'
+                : 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
               color: '#ffffff',
               border: 'none',
               borderRadius: '8px',
               fontWeight: '500',
-              cursor: 'pointer',
+              cursor: saveStatus === 'saving' ? 'not-allowed' : 'pointer',
               fontSize: '14px',
               transition: 'all 0.2s ease',
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
               position: 'relative',
-              zIndex: 1000
+              zIndex: 1000,
+              opacity: saveStatus === 'saving' ? 0.7 : 1
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'linear-gradient(135deg, #15803d 0%, #166534 100%)';
+              if (saveStatus === 'idle') {
+                e.currentTarget.style.background = 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)';
+              }
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)';
+              if (saveStatus === 'idle') {
+                e.currentTarget.style.background = 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)';
+              }
             }}
           >
-            <CheckCircle size={16} />
-            Appliquer la Configuration
+            {saveStatus === 'saving' && 'Enregistrement...'}
+            {saveStatus === 'success' && 'Configuration enregistrée'}
+            {saveStatus === 'error' && 'Erreur lors de l\'enregistrement'}
+            {saveStatus === 'idle' && 'Appliquer la Configuration'}
           </button>
         </div>
       </div>

@@ -107,6 +107,9 @@ lru = "0.12"                  # Cache LRU pour résultats OCR
 # Alternative #1: lopdf (Pure Rust - RECOMMANDÉ)
 lopdf = "0.32.0"              # Pure Rust PDF manipulation (Rust 2024 edition)
 
+# Alternative #2: extractous (2025 - OCR intégré)
+extractous = { version = "0.3.0", optional = true }  # High-performance document extraction with OCR
+
 # Alternative #2: pdf-extract (Simple)
 pdf-extract = "0.7.7"         # Simple text extraction (Pure Rust)
 
@@ -131,3 +134,7 @@ ammonia = "4.0"                # HTML sanitization sécurisé
 base64 = "0.21"                # Encodage pour HMAC
 
 # Test dependencies removed - all tests cleaned up
+
+[features]
+default = ["extractous"]  # Activer extractous par défaut
+extractous = ["dep:extractous"]  # Feature pour l'extraction OCR avancée

@@ -7,7 +7,7 @@ export interface SettingsWindowProps {
   onClose: () => void;
 }
 
-export const SettingsWindow: React.FC<SettingsWindowProps> = ({ onClose }) => {
+export const SettingsWindow: React.FC<SettingsWindowProps> = () => {
   const [activeTab, setActiveTab] = useState<'connections' | 'ollama' | 'huggingface'>('connections');
 
   return (
@@ -28,112 +28,107 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ onClose }) => {
       <div style={{ 
         background: 'linear-gradient(90deg, #1e293b 0%, #334155 100%)',
         borderBottom: '1px solid #475569',
-        padding: '16px 24px',
+        padding: '16px 24px 0 24px',
         display: 'flex',
-        alignItems: 'center',
+        alignItems: 'end',
         justifyContent: 'space-between'
       }}>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '2px', marginBottom: '-1px' }}>
           <button
             onClick={() => setActiveTab('connections')}
             style={{
-              padding: '12px 24px',
+              padding: '12px 24px 16px 24px',
               background: activeTab === 'connections' 
-                ? 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' 
-                : 'transparent',
-              color: activeTab === 'connections' ? '#ffffff' : '#94a3b8',
-              border: activeTab === 'connections' 
-                ? '1px solid #3b82f6' 
-                : '1px solid transparent',
-              borderRadius: '8px',
+                ? 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)' 
+                : 'linear-gradient(135deg, #374151 0%, #4b5563 100%)',
+              color: activeTab === 'connections' ? '#ffffff' : '#d1d5db',
+              border: '1px solid #475569',
+              borderBottom: activeTab === 'connections' ? '1px solid #0f172a' : '1px solid #475569',
+              borderTopLeftRadius: '12px',
+              borderTopRightRadius: '12px',
+              borderBottomLeftRadius: '0',
+              borderBottomRightRadius: '0',
               cursor: 'pointer',
               fontSize: '14px',
               fontWeight: '500',
-              transition: 'all 0.2s ease'
+              transition: 'all 0.2s ease',
+              position: 'relative',
+              zIndex: activeTab === 'connections' ? 2 : 1,
+              boxShadow: activeTab === 'connections' 
+                ? '0 -2px 8px rgba(0, 0, 0, 0.3)' 
+                : '0 2px 4px rgba(0, 0, 0, 0.1)'
             }}
           >
-            🔗 Connexions
+            Connexions
           </button>
           <button
             onClick={() => setActiveTab('ollama')}
             style={{
-              padding: '12px 24px',
+              padding: '12px 24px 16px 24px',
               background: activeTab === 'ollama' 
-                ? 'linear-gradient(135deg, #10b981 0%, #047857 100%)' 
-                : 'transparent',
-              color: activeTab === 'ollama' ? '#ffffff' : '#94a3b8',
-              border: activeTab === 'ollama' 
-                ? '1px solid #10b981' 
-                : '1px solid transparent',
-              borderRadius: '8px',
+                ? 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)' 
+                : 'linear-gradient(135deg, #374151 0%, #4b5563 100%)',
+              color: activeTab === 'ollama' ? '#ffffff' : '#d1d5db',
+              border: '1px solid #475569',
+              borderBottom: activeTab === 'ollama' ? '1px solid #0f172a' : '1px solid #475569',
+              borderTopLeftRadius: '12px',
+              borderTopRightRadius: '12px',
+              borderBottomLeftRadius: '0',
+              borderBottomRightRadius: '0',
               cursor: 'pointer',
               fontSize: '14px',
               fontWeight: '500',
-              transition: 'all 0.2s ease'
+              transition: 'all 0.2s ease',
+              position: 'relative',
+              zIndex: activeTab === 'ollama' ? 2 : 1,
+              boxShadow: activeTab === 'ollama' 
+                ? '0 -2px 8px rgba(0, 0, 0, 0.3)' 
+                : '0 2px 4px rgba(0, 0, 0, 0.1)'
             }}
           >
-            🦙 Ollama
+            Ollama
           </button>
           <button
             onClick={() => setActiveTab('huggingface')}
             style={{
-              padding: '12px 24px',
+              padding: '12px 24px 16px 24px',
               background: activeTab === 'huggingface' 
-                ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' 
-                : 'transparent',
-              color: activeTab === 'huggingface' ? '#ffffff' : '#94a3b8',
-              border: activeTab === 'huggingface' 
-                ? '1px solid #f59e0b' 
-                : '1px solid transparent',
-              borderRadius: '8px',
+                ? 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)' 
+                : 'linear-gradient(135deg, #374151 0%, #4b5563 100%)',
+              color: activeTab === 'huggingface' ? '#ffffff' : '#d1d5db',
+              border: '1px solid #475569',
+              borderBottom: activeTab === 'huggingface' ? '1px solid #0f172a' : '1px solid #475569',
+              borderTopLeftRadius: '12px',
+              borderTopRightRadius: '12px',
+              borderBottomLeftRadius: '0',
+              borderBottomRightRadius: '0',
               cursor: 'pointer',
               fontSize: '14px',
               fontWeight: '500',
-              transition: 'all 0.2s ease'
+              transition: 'all 0.2s ease',
+              position: 'relative',
+              zIndex: activeTab === 'huggingface' ? 2 : 1,
+              boxShadow: activeTab === 'huggingface' 
+                ? '0 -2px 8px rgba(0, 0, 0, 0.3)' 
+                : '0 2px 4px rgba(0, 0, 0, 0.1)'
             }}
           >
-            🤗 Hugging Face
+            Hugging Face
           </button>
         </div>
-        
-        <button
-          onClick={onClose}
-          style={{
-            padding: '8px 16px',
-            background: 'transparent',
-            color: '#94a3b8',
-            border: '1px solid #475569',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontSize: '14px',
-            fontWeight: '500',
-            transition: 'all 0.2s ease'
-          }}
-          onMouseOver={(e) => {
-            e.currentTarget.style.background = '#dc2626';
-            e.currentTarget.style.color = '#ffffff';
-            e.currentTarget.style.borderColor = '#dc2626';
-          }}
-          onMouseOut={(e) => {
-            e.currentTarget.style.background = 'transparent';
-            e.currentTarget.style.color = '#94a3b8';
-            e.currentTarget.style.borderColor = '#475569';
-          }}
-        >
-          ✕ Fermer
-        </button>
       </div>
 
-      {/* Content */}
+      {/* Contenu des onglets - Scrollable */}
       <div style={{ 
         flex: 1, 
-        padding: '24px',
         overflow: 'auto',
         background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f1629 100%)'
       }}>
+        <div style={{ padding: '24px' }}>
         {activeTab === 'connections' && <ConnectionsTab />}
         {activeTab === 'ollama' && <OllamaTab />}
         {activeTab === 'huggingface' && <HuggingFaceTab />}
+        </div>
       </div>
     </div>
   );

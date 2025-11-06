@@ -4,26 +4,56 @@
   <meta charset="utf-8">
   <style>
     body {
-      width: 280px;
-      padding: 16px;
+      width: 380px;
+      min-height: 520px;
+      padding: 0;
+      margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       font-size: 14px;
-      margin: 0;
-      background: #f8f9fa;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      overflow: hidden;
+    }
+
+    .container {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      border-radius: 16px;
+      margin: 12px;
+      padding: 24px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+      min-height: 480px;
+      display: flex;
+      flex-direction: column;
     }
 
     .header {
       text-align: center;
-      margin-bottom: 16px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid #e1e5e9;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid rgba(102, 126, 234, 0.2);
     }
 
     .logo {
-      font-size: 20px;
-      font-weight: bold;
-      color: #2c3e50;
-      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .logo-image {
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+    }
+
+    .logo-text {
+      font-size: 22px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
     }
 
     .subtitle {
@@ -93,22 +123,27 @@
     }
 
     .btn-primary {
-      background: #007bff;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
+      border: none;
+      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
     }
 
     .btn-primary:hover:not(:disabled) {
-      background: #0056b3;
-      transform: translateY(-1px);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
     }
 
     .btn-secondary {
-      background: #6c757d;
-      color: white;
+      background: rgba(255, 255, 255, 0.8);
+      color: #667eea;
+      border: 1px solid rgba(102, 126, 234, 0.3);
+      backdrop-filter: blur(10px);
     }
 
     .btn-secondary:hover:not(:disabled) {
-      background: #545b62;
+      background: rgba(255, 255, 255, 1);
+      border-color: rgba(102, 126, 234, 0.5);
       transform: translateY(-1px);
     }
 
@@ -184,10 +219,14 @@
   </style>
 </head>
 <body>
-  <div class="header">
-    <div class="logo">🤖 GRAVIS</div>
-    <div class="subtitle">Context Extractor</div>
-  </div>
+  <div class="container">
+    <div class="header">
+      <div class="logo">
+        <img src="icons/gravis-logo.png" alt="GRAVIS Logo" class="logo-image">
+        <div class="logo-text">GRAVIS</div>
+      </div>
+      <div class="subtitle">Context Extractor • Phase 1</div>
+    </div>
 
   <div id="status" class="status checking">
     <span class="status-icon">🔄</span>
@@ -233,6 +272,7 @@
     </div>
   </div>
 
-  <script src="popup.js"></script>
+    <script src="popup.js"></script>
+  </div>
 </body>
 </html>

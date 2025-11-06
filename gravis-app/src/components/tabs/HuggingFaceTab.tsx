@@ -3,12 +3,8 @@ import { huggingFaceManager, type HuggingFaceModel, type PopularHFModel } from '
 
 export const HuggingFaceTab: React.FC = () => {
   const [isHFAvailable, setIsHFAvailable] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<HuggingFaceModel[]>([]);
   const [popularModels, setPopularModels] = useState<PopularHFModel[]>([]);
   const [localModels, setLocalModels] = useState<HuggingFaceModel[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [isSearching, setIsSearching] = useState(false);
   const [downloadingModel, setDownloadingModel] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState({ completed: 0, total: 0, status: '' });
 
@@ -33,19 +29,6 @@ export const HuggingFaceTab: React.FC = () => {
     setLocalModels(models);
   };
 
-  const searchModels = async () => {
-    if (!searchQuery.trim()) return;
-    
-    setIsSearching(true);
-    try {
-      const results = await huggingFaceManager.searchModels(searchQuery, 20);
-      setSearchResults(results);
-    } catch (error) {
-      console.error('Error searching models:', error);
-    } finally {
-      setIsSearching(false);
-    }
-  };
 
   const downloadModel = async (modelId: string) => {
     setDownloadingModel(modelId);
@@ -71,10 +54,6 @@ export const HuggingFaceTab: React.FC = () => {
     }
   };
 
-  const categories = huggingFaceManager.getCategories();
-  const filteredPopularModels = selectedCategory === 'all' 
-    ? popularModels 
-    : popularModels.filter(model => model.category === selectedCategory);
 
   return (
     <div style={{ 
@@ -123,7 +102,7 @@ export const HuggingFaceTab: React.FC = () => {
                 color: '#ffffff',
                 marginBottom: '8px'
               }}>
-                🤗 Modèles Hugging Face
+                Modèles Hugging Face
               </h2>
               <p style={{ 
                 color: '#9ca3af',
@@ -135,240 +114,18 @@ export const HuggingFaceTab: React.FC = () => {
             </div>
           </div>
 
-          {/* Section de recherche */}
-          <div style={{ marginBottom: '32px' }}>
-            <div style={{ 
-              display: 'flex', 
-              gap: '12px',
-              marginBottom: '24px'
-            }}>
-              <input
-                type="text"
-                placeholder="Rechercher un modèle..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && searchModels()}
-                style={{
-                  flex: 1,
-                  padding: '12px 16px',
-                  borderRadius: '8px',
-                  border: '1px solid #374151',
-                  background: '#1f2937',
-                  color: '#ffffff',
-                  fontSize: '14px'
-                }}
-              />
-              <button
-                onClick={searchModels}
-                disabled={isSearching || !searchQuery.trim()}
-                style={{
-                  padding: '12px 24px',
-                  backgroundColor: isSearching ? '#6b7280' : '#3b82f6',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: isSearching ? 'not-allowed' : 'pointer',
-                  fontSize: '14px',
-                  fontWeight: '500'
-                }}
-              >
-                {isSearching ? '🔍 Recherche...' : '🔍 Rechercher'}
-              </button>
-            </div>
-
-            {/* Résultats de recherche - Tableau */}
-            {searchResults.length > 0 && (
-              <div style={{ marginBottom: '32px' }}>
-                <h3 style={{ 
-                  color: '#ffffff',
-                  fontSize: '18px',
-                  marginBottom: '16px',
-                  fontWeight: '500'
-                }}>
-                  📋 Résultats de recherche ({searchResults.length})
-                </h3>
-                <div style={{
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  borderRadius: '12px',
-                  overflow: 'hidden'
-                }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ backgroundColor: 'rgba(255, 255, 255, 0.1)' }}>
-                        <th style={{ 
-                          padding: '12px 16px', 
-                          textAlign: 'left', 
-                          color: '#ffffff', 
-                          fontWeight: '600',
-                          fontSize: '14px'
-                        }}>
-                          Modèle
-                        </th>
-                        <th style={{ 
-                          padding: '12px 16px', 
-                          textAlign: 'center', 
-                          color: '#ffffff', 
-                          fontWeight: '600',
-                          fontSize: '14px'
-                        }}>
-                          Auteur
-                        </th>
-                        <th style={{ 
-                          padding: '12px 16px', 
-                          textAlign: 'center', 
-                          color: '#ffffff', 
-                          fontWeight: '600',
-                          fontSize: '14px'
-                        }}>
-                          Type
-                        </th>
-                        <th style={{ 
-                          padding: '12px 16px', 
-                          textAlign: 'center', 
-                          color: '#ffffff', 
-                          fontWeight: '600',
-                          fontSize: '14px'
-                        }}>
-                          Téléchargements
-                        </th>
-                        <th style={{ 
-                          padding: '12px 16px', 
-                          textAlign: 'center', 
-                          color: '#ffffff', 
-                          fontWeight: '600',
-                          fontSize: '14px'
-                        }}>
-                          Likes
-                        </th>
-                        <th style={{ 
-                          padding: '12px 16px', 
-                          textAlign: 'center', 
-                          color: '#ffffff', 
-                          fontWeight: '600',
-                          fontSize: '14px'
-                        }}>
-                          Action
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {searchResults.map((model, index) => (
-                        <tr key={index} style={{ 
-                          borderTop: '1px solid rgba(255, 255, 255, 0.1)'
-                        }}>
-                          <td style={{ 
-                            padding: '16px',
-                            color: '#ffffff',
-                            fontWeight: '500',
-                            fontSize: '14px'
-                          }}>
-                            {model.name}
-                          </td>
-                          <td style={{ 
-                            padding: '16px',
-                            textAlign: 'center',
-                            color: '#9ca3af',
-                            fontSize: '14px'
-                          }}>
-                            {model.author}
-                          </td>
-                          <td style={{ 
-                            padding: '16px',
-                            textAlign: 'center'
-                          }}>
-                            <span style={{
-                              fontSize: '12px',
-                              color: '#6b7280',
-                              backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                              padding: '4px 8px',
-                              borderRadius: '4px'
-                            }}>
-                              {model.modelType}
-                            </span>
-                          </td>
-                          <td style={{ 
-                            padding: '16px',
-                            textAlign: 'center',
-                            color: '#9ca3af',
-                            fontSize: '14px'
-                          }}>
-                            {model.downloads.toLocaleString()}
-                          </td>
-                          <td style={{ 
-                            padding: '16px',
-                            textAlign: 'center',
-                            color: '#9ca3af',
-                            fontSize: '14px'
-                          }}>
-                            {model.likes}
-                          </td>
-                          <td style={{ 
-                            padding: '16px',
-                            textAlign: 'center'
-                          }}>
-                            <button
-                              onClick={() => downloadModel(model.id)}
-                              disabled={downloadingModel === model.id}
-                              style={{
-                                padding: '6px 12px',
-                                backgroundColor: downloadingModel === model.id ? '#6b7280' : '#3b82f6',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '6px',
-                                fontSize: '12px',
-                                fontWeight: '500',
-                                cursor: downloadingModel === model.id ? 'not-allowed' : 'pointer'
-                              }}
-                            >
-                              {downloadingModel === model.id ? '⏳ En cours...' : '📥 Télécharger'}
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
 
           {/* Modèles populaires - Tableau */}
           <div style={{ marginBottom: '32px' }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: '16px'
+            <h3 style={{ 
+              color: '#ffffff',
+              fontSize: '18px',
+              margin: 0,
+              marginBottom: '16px',
+              fontWeight: '500'
             }}>
-              <h3 style={{ 
-                color: '#ffffff',
-                fontSize: '18px',
-                margin: 0,
-                fontWeight: '500'
-              }}>
-                ⭐ Modèles populaires
-              </h3>
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                style={{
-                  padding: '8px 12px',
-                  borderRadius: '6px',
-                  border: '1px solid #374151',
-                  background: '#1f2937',
-                  color: '#ffffff',
-                  fontSize: '12px'
-                }}
-              >
-                <option value="all">Toutes les catégories</option>
-                {categories.map(category => (
-                  <option key={category} value={category}>
-                    {category}
-                  </option>
-                ))}
-              </select>
-            </div>
+              Modèles populaires
+            </h3>
             
             <div style={{
               background: 'rgba(255, 255, 255, 0.05)',
@@ -431,21 +188,12 @@ export const HuggingFaceTab: React.FC = () => {
                       fontWeight: '600',
                       fontSize: '14px'
                     }}>
-                      Tags
-                    </th>
-                    <th style={{ 
-                      padding: '12px 16px', 
-                      textAlign: 'center', 
-                      color: '#ffffff', 
-                      fontWeight: '600',
-                      fontSize: '14px'
-                    }}>
                       Action
                     </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredPopularModels.filter((model) => {
+                  {popularModels.filter((model) => {
                     // Masquer les modèles déjà installés
                     return !localModels.some(m => m.id === model.id);
                   }).map((model, index) => {
@@ -511,37 +259,6 @@ export const HuggingFaceTab: React.FC = () => {
                           padding: '16px',
                           textAlign: 'center'
                         }}>
-                          <div style={{ 
-                            display: 'flex',
-                            gap: '4px',
-                            flexWrap: 'wrap',
-                            justifyContent: 'center'
-                          }}>
-                            {model.tags.slice(0, 2).map(tag => (
-                              <span key={tag} style={{
-                                fontSize: '10px',
-                                padding: '2px 4px',
-                                background: 'rgba(59, 130, 246, 0.2)',
-                                color: '#60a5fa',
-                                borderRadius: '4px'
-                              }}>
-                                {tag}
-                              </span>
-                            ))}
-                            {model.tags.length > 2 && (
-                              <span style={{
-                                fontSize: '10px',
-                                color: '#9ca3af'
-                              }}>
-                                +{model.tags.length - 2}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td style={{ 
-                          padding: '16px',
-                          textAlign: 'center'
-                        }}>
                           {isDownloading ? (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
                               <div style={{
@@ -581,7 +298,7 @@ export const HuggingFaceTab: React.FC = () => {
                                 cursor: 'pointer'
                               }}
                             >
-                              📥 Télécharger
+                              Télécharger
                             </button>
                           )}
                         </td>
@@ -731,7 +448,7 @@ export const HuggingFaceTab: React.FC = () => {
                               cursor: 'pointer'
                             }}
                           >
-                            🗑️ Supprimer
+                            Supprimer
                           </button>
                         </td>
                       </tr>
