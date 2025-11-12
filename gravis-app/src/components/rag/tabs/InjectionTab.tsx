@@ -1,6 +1,7 @@
 import React from 'react';
 import { Search, Database, Trash2, X } from 'lucide-react';
-import type { InjectionMetadata, NotificationState } from '../types';
+import type { InjectionMetadata, NotificationState, ChunkProfile } from '../types';
+import { CHUNK_PROFILES } from '../types';
 
 interface InjectionTabProps {
   ragQuery: string;
@@ -18,6 +19,7 @@ interface InjectionTabProps {
   onDeleteRagDocument: (documentId: string) => void;
   onSetShowInjectionModal: (docName: string | null) => void;
   onSetInjectionMetadata: (metadata: InjectionMetadata) => void;
+  onSetChunkProfile: (profile: ChunkProfile) => void;
   onInjectDocument: (docName: string) => void;
   onPrepareInjection: (docName: string) => void;
 }
@@ -38,6 +40,7 @@ export const InjectionTab: React.FC<InjectionTabProps> = ({
   onDeleteRagDocument,
   onSetShowInjectionModal,
   onSetInjectionMetadata,
+  onSetChunkProfile,
   onInjectDocument,
   onPrepareInjection
 }) => {
@@ -216,7 +219,7 @@ export const InjectionTab: React.FC<InjectionTabProps> = ({
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
                   <div style={{ fontWeight: '500', fontSize: '14px' }}>
-                    {result.business_metadata?.title || result.document_id}
+                    {result.document_title || result.source_file || result.document_id}
                   </div>
                   <div style={{ fontSize: '12px', color: '#999' }}>
                     Score: {(result.score || 0).toFixed(3)}
@@ -227,7 +230,7 @@ export const InjectionTab: React.FC<InjectionTabProps> = ({
                   {(result.content || '').length > 200 && '...'}
                 </div>
                 <div style={{ marginTop: '8px', fontSize: '11px', color: '#666' }}>
-                  ID: {result.document_id} | Chunk: {result.chunk_index || 0}
+                  ID: {result.document_id.substring(0, 12)}... | Chunk: {result.chunk_index || 0}
                 </div>
               </div>
             ))}
@@ -289,22 +292,19 @@ export const InjectionTab: React.FC<InjectionTabProps> = ({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                     <Database size={16} style={{ color: '#22c55e' }} />
                     <div style={{ fontWeight: '500', fontSize: '14px' }}>
-                      {doc.business_metadata?.title || doc.document_id}
+                      {doc.document_title || doc.source_file || doc.document_id}
                     </div>
                   </div>
                   <div style={{ fontSize: '12px', color: '#999', marginLeft: '24px' }}>
-                    {doc.business_metadata?.description && (
-                      <div>{doc.business_metadata.description}</div>
-                    )}
                     <div style={{ display: 'flex', gap: '16px', fontSize: '11px', color: '#666', marginTop: '4px' }}>
-                      <span>ID: {doc.document_id}</span>
-                      <span>Chunks: {doc.chunk_count || 0}</span>
-                      <span>Catégorie: {doc.business_metadata?.category || 'N/A'}</span>
-                      {doc.business_metadata?.author && <span>Auteur: {doc.business_metadata.author}</span>}
+                      <span>ID: {doc.document_id.substring(0, 12)}...</span>
+                      <span>Chunks: {doc.chunks_count || 0}</span>
+                      <span>Catégorie: {doc.document_category || 'N/A'}</span>
+                      {doc.document_author && <span>Auteur: {doc.document_author}</span>}
                     </div>
-                    {doc.business_metadata?.tags && doc.business_metadata.tags.length > 0 && (
+                    {doc.document_tags && doc.document_tags.length > 0 && (
                       <div style={{ marginTop: '4px' }}>
-                        {doc.business_metadata.tags.map((tag: string, tagIndex: number) => (
+                        {doc.document_tags.map((tag: string, tagIndex: number) => (
                           <span key={tagIndex} style={{
                             background: 'rgba(59, 130, 246, 0.1)',
                             color: '#60a5fa',
@@ -572,73 +572,101 @@ export const InjectionTab: React.FC<InjectionTabProps> = ({
                       />
                     </div>
 
-                    <div style={{ display: 'flex', gap: '12px' }}>
-                      <div style={{ flex: 1 }}>
-                        <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', color: '#ccc' }}>
-                          Langue
-                        </label>
-                        <select
-                          value={injectionMetadata.language}
-                          onChange={(e) => onSetInjectionMetadata({...injectionMetadata, language: e.target.value})}
-                          style={{
-                            width: '100%',
-                            padding: '8px 12px',
-                            background: 'rgba(0, 0, 0, 0.3)',
-                            border: '1px solid rgba(255, 255, 255, 0.2)',
-                            borderRadius: '6px',
-                            color: '#ffffff',
-                            fontSize: '14px'
-                          }}
-                        >
-                          <option value="auto">Auto-détection</option>
-                          <option value="fr">Français</option>
-                          <option value="en">Anglais</option>
-                          <option value="es">Espagnol</option>
-                          <option value="de">Allemand</option>
-                          <option value="it">Italien</option>
-                        </select>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', color: '#ccc' }}>
+                        Langue
+                      </label>
+                      <select
+                        value={injectionMetadata.language}
+                        onChange={(e) => onSetInjectionMetadata({...injectionMetadata, language: e.target.value})}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px',
+                          background: 'rgba(0, 0, 0, 0.3)',
+                          border: '1px solid rgba(255, 255, 255, 0.2)',
+                          borderRadius: '6px',
+                          color: '#ffffff',
+                          fontSize: '14px'
+                        }}
+                      >
+                        <option value="auto">Auto-détection</option>
+                        <option value="fr">Français</option>
+                        <option value="en">Anglais</option>
+                        <option value="es">Espagnol</option>
+                        <option value="de">Allemand</option>
+                        <option value="it">Italien</option>
+                      </select>
+                    </div>
+
+                    {/* Profils de chunking */}
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '8px', fontSize: '13px', color: '#ccc' }}>
+                        Configuration des chunks
+                      </label>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {(Object.entries(CHUNK_PROFILES) as [ChunkProfile, typeof CHUNK_PROFILES[ChunkProfile]][]).map(([profile, config]) => (
+                          <div
+                            key={profile}
+                            onClick={() => onSetChunkProfile(profile)}
+                            style={{
+                              padding: '12px',
+                              background: injectionMetadata.chunkProfile === profile
+                                ? 'rgba(34, 197, 94, 0.15)'
+                                : 'rgba(255, 255, 255, 0.03)',
+                              border: `2px solid ${injectionMetadata.chunkProfile === profile
+                                ? 'rgba(34, 197, 94, 0.5)'
+                                : 'rgba(255, 255, 255, 0.1)'}`,
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                              <span style={{ fontSize: '18px' }}>{config.icon}</span>
+                              <span style={{ fontWeight: '600', fontSize: '14px', color: '#ffffff' }}>
+                                {config.name}
+                              </span>
+                              {profile === 'balanced' && (
+                                <span style={{
+                                  fontSize: '10px',
+                                  background: 'rgba(251, 191, 36, 0.2)',
+                                  color: '#fbbf24',
+                                  padding: '2px 6px',
+                                  borderRadius: '3px',
+                                  fontWeight: '600'
+                                }}>
+                                  RECOMMANDÉ
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#ccc', marginBottom: '6px' }}>
+                              {config.description}
+                            </div>
+                            <div style={{ display: 'flex', gap: '12px', fontSize: '11px', color: '#999' }}>
+                              <span>{config.chunkSize} tokens</span>
+                              <span>•</span>
+                              <span>{config.chunkOverlap} overlap</span>
+                              <span>•</span>
+                              <span>{config.expectedChunks}</span>
+                            </div>
+                            <div style={{ marginTop: '8px', fontSize: '11px', color: '#888' }}>
+                              <strong style={{ color: '#aaa' }}>Idéal pour:</strong> {config.bestFor.join(', ')}
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <div style={{ flex: 1 }}>
-                        <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', color: '#ccc' }}>
-                          Taille des chunks
-                        </label>
-                        <input
-                          type="number"
-                          value={injectionMetadata.chunkSize}
-                          onChange={(e) => onSetInjectionMetadata({...injectionMetadata, chunkSize: parseInt(e.target.value) || 512})}
-                          style={{
-                            width: '100%',
-                            padding: '8px 12px',
-                            background: 'rgba(0, 0, 0, 0.3)',
-                            border: '1px solid rgba(255, 255, 255, 0.2)',
-                            borderRadius: '6px',
-                            color: '#ffffff',
-                            fontSize: '14px'
-                          }}
-                          min="64"
-                          max="2048"
-                        />
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', color: '#ccc' }}>
-                          Chevauchement
-                        </label>
-                        <input
-                          type="number"
-                          value={injectionMetadata.chunkOverlap}
-                          onChange={(e) => onSetInjectionMetadata({...injectionMetadata, chunkOverlap: parseInt(e.target.value) || 50})}
-                          style={{
-                            width: '100%',
-                            padding: '8px 12px',
-                            background: 'rgba(0, 0, 0, 0.3)',
-                            border: '1px solid rgba(255, 255, 255, 0.2)',
-                            borderRadius: '6px',
-                            color: '#ffffff',
-                            fontSize: '14px'
-                          }}
-                          min="0"
-                          max="200"
-                        />
+
+                      {/* Détails du profil sélectionné */}
+                      <div style={{
+                        marginTop: '12px',
+                        padding: '12px',
+                        background: 'rgba(59, 130, 246, 0.1)',
+                        border: '1px solid rgba(59, 130, 246, 0.3)',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        color: '#93c5fd'
+                      }}>
+                        <strong>ℹ️ Profil sélectionné:</strong> {CHUNK_PROFILES[injectionMetadata.chunkProfile].details}
                       </div>
                     </div>
 

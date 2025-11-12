@@ -59,22 +59,17 @@ export const ModelSelectorWindow: React.FC<ModelSelectorWindowProps> = ({ onClos
     } catch (err) {
       console.error('Error loading models:', err);
       setError(err instanceof Error ? err.message : 'Erreur de connexion');
-      
-      // Si aucune connexion n'est configurée, ne pas afficher de modèles par défaut
+
+      // Ne jamais afficher de modèles par défaut si les connexions échouent
+      // Cela force l'utilisateur à vérifier ses connexions
+      setAvailableModels([]);
+      setModelSources([]);
+
       if (modelConfigStore.activeConnections.length === 0 && !modelConfigStore.selectedConnectionId) {
-        setAvailableModels([]);
-        setModelSources([]);
-        setError('Aucune connexion configurée. Veuillez ajouter une connexion dans les paramètres.');
+        setError('Aucune connexion configurée. Veuillez ajouter une connexion LiteLLM, Ollama ou Modal dans les paramètres.');
       } else {
-        // Sinon, utiliser les modèles par défaut comme fallback
-        setAvailableModels(AVAILABLE_MODELS);
-        setModelSources([{
-          name: 'Modèles par défaut',
-          type: 'default',
-          baseUrl: 'built-in',
-          modelCount: AVAILABLE_MODELS.length,
-          isAvailable: true
-        }]);
+        const connectionNames = modelConfigStore.activeConnections.map((c: any) => c.name).join(', ');
+        setError(`Impossible de se connecter à ${connectionNames}. Vérifiez que les serveurs sont accessibles et démarrés.`);
       }
     } finally {
       setIsLoading(false);

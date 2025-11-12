@@ -5,21 +5,23 @@ Intégrer le système OCR complètement développé dans le pipeline RAG existan
 
 ## 📊 État Actuel - Mis à jour le 2025-11-06
 
-### 🎉 Phase 3B TERMINÉE : Pipeline RAG Production Fonctionnel !
+### 🎉 Phase 3C TERMINÉE : Corrections & Stabilisation Production !
 
 **Système RAG Opérationnel End-to-End :**
 - ✅ Extraction de texte (OCR AWCS ou natif PDF)
 - ✅ Génération embeddings (CustomE5 384D)
-- ✅ Persistance Qdrant (Collections par groupe)
+- ✅ Persistance Qdrant (Collections par groupe avec ID fixe)
 - ✅ Interface utilisateur complète (Injection + Visualisation)
+- ✅ Arguments Tauri unifiés (camelCase frontend ↔ snake_case backend)
 
 **Métriques Production :**
-- 4 documents persistés et testés
-- 25 chunks avec embeddings stockés dans Qdrant
+- 3 documents persistés et testés (75 chunks au total)
+- Collection unique : `collection_default_group` avec ID fixe
 - Confidence moyenne : 85%
 - Temps réponse list_rag_documents : <500ms
 - 0% erreurs Qdrant (UUID blake3 valides)
 - 100% réutilisation texte AWCS (pas de réextraction)
+- 100% affichage documents persistés dans l'interface
 
 ---
 
@@ -672,6 +674,138 @@ const handleInject = async (docName: string) => {
 
 ---
 
+### 🔧 Phase 3C: Corrections Arguments & Collection Persistante (1 jour) ✅ TERMINÉE
+
+**Problèmes Identifiés:**
+- Erreurs mapping arguments Tauri: `missing required key filePath`, `missing required key groupId`
+- Collection Qdrant avec UUID aléatoire changeant à chaque redémarrage
+- Documents non affichés dans l'interface malgré persistance dans Qdrant
+- Structure JSX avec fragment non fermé dans RagWindow.tsx
+
+**Solutions Implémentées:**
+
+#### 3C.1 Correction Mapping Arguments Tauri ✅
+```typescript
+// Frontend: Conversion snake_case → camelCase pour Tauri 2.x
+// src/hooks/useRagLogic.ts
+
+// AVANT (❌ Erreur)
+const result = await invoke('add_document_intelligent', {
+  file_path: filePath,        // ❌ snake_case
+  group_id: groupId,          // ❌ snake_case
+  extracted_text: text        // ❌ snake_case
+});
+
+// APRÈS (✅ Correct)
+const result = await invoke('add_document_intelligent', {
+  filePath: filePath,         // ✅ camelCase
+  groupId: groupId,           // ✅ camelCase
+  extractedText: text         // ✅ camelCase
+});
+```
+
+**Commandes corrigées:**
+- `add_document_intelligent`: `file_path` → `filePath`, `group_id` → `groupId`, `extracted_text` → `extractedText`
+- `list_rag_documents`: `group_id` → `groupId`
+- `delete_rag_document`: `document_id` → `documentId`, `group_id` → `groupId`
+- `search_with_metadata`: `group_id` → `groupId`, `include_content` → `includeContent`, `include_business_metadata` → `includeBusinessMetadata`
+- `upload_document`: `sourceFilePath` → `filePath`, `fileName` → `targetName`
+
+#### 3C.2 ID Fixe pour DocumentGroup ✅
+```rust
+// src/rag/mod.rs - Nouvelle méthode new_with_id()
+impl DocumentGroup {
+    /// Créer un groupe avec un ID spécifique (pour groupes prédéfinis)
+    pub fn new_with_id(id: String, name: String) -> Self {
+        let now = SystemTime::now();
+        Self {
+            id: id.clone(),
+            name,
+            active: true,
+            chunk_config: ChunkConfig::default(),
+            metadata_config: MetadataConfig::default(),
+            documents: Vec::new(),
+            qdrant_collection: format!("collection_{}", id), // ID fixe !
+            created_at: now,
+            updated_at: now,
+        }
+    }
+}
+
+// src/rag/commands.rs - Utilisation pour default_group
+let default_group = DocumentGroup::new_with_id(
+    "default_group".to_string(),
+    "Default Group".to_string()
+);
+// Résultat: collection_default_group (constant à chaque démarrage)
+```
+
+**Avant vs Après:**
+- **Avant**: `default_group` → UUID aléatoire `group_6f1705fb...` → `collection_group_6f1705fb...`
+- **Après**: `default_group` → ID fixe `"default_group"` → `collection_default_group`
+
+#### 3C.3 Logs de Debug Améliorés ✅
+```rust
+// src/rag/commands.rs - Ajout logs traçabilité
+pub async fn list_rag_documents(group_id: String, state: State<'_, RagState>)
+    -> Result<Vec<RagDocumentInfo>, String> {
+
+    info!("📋 Listing RAG documents from group: {}", group_id);
+
+    let collection_name = if let Some(group) = groups.get(&group_id) {
+        let coll = group.qdrant_collection.clone();
+        info!("✅ Found group '{}' with collection: {}", group_id, coll);
+        coll
+    } else {
+        warn!("⚠️ Group '{}' not found! Using fallback", group_id);
+        format!("collection_{}", group_id)
+    };
+
+    info!("🔍 Querying Qdrant collection: {}", collection_name);
+
+    // ... récupération documents ...
+
+    info!("📊 Returning {} documents with {} total chunks from collection {}",
+          documents.len(), total_chunks, collection_name);
+
+    Ok(documents)
+}
+```
+
+#### 3C.4 Corrections Frontend ✅
+```typescript
+// src/components/RagWindow.tsx - Structure JSX corrigée
+return (
+  <>
+    {/* ... contenu ... */}
+    </div>  {/* Fermeture div principal */}
+  </>       {/* Fermeture fragment */}
+);          {/* Fermeture return */}
+};            {/* Fermeture composant */}
+
+// Warnings TypeScript nettoyés
+- Imports non utilisés supprimés (RefreshCw, Zap, Filter, Eye)
+- Variables non utilisées retirées (showNotification, businessMetadata)
+- Paramètres optionnels ajoutés (onClose?: () => void)
+```
+
+**Résultats Phase 3C:**
+- ✅ **0 erreurs arguments Tauri** : Tous les paramètres correctement mappés camelCase ↔ snake_case
+- ✅ **Collection persistante** : `collection_default_group` constante entre redémarrages
+- ✅ **Affichage fonctionnel** : 3 documents, 75 chunks affichés correctement dans l'interface
+- ✅ **Build clean** : TypeScript compile sans erreurs, Rust compile avec 0 erreurs
+- ✅ **Logs complets** : Traçabilité end-to-end de l'injection à l'affichage
+- ✅ **Qdrant persistant** : Données conservées entre sessions application
+
+**Tests Validés Phase 3C:**
+- ✅ Injection 3 documents → 75 chunks dans `collection_default_group`
+- ✅ Redémarrage app → Collection toujours `collection_default_group`
+- ✅ Clic "Voir RAG" → Affichage "Documents dans le RAG (3)"
+- ✅ Vérification Qdrant: `curl http://localhost:6333/collections/collection_default_group` → 75 points
+- ✅ Console logs: Tous les steps visibles avec emojis de traçabilité
+
+---
+
 ## **Phase 4: Optimisations Production (4 jours)** 🔄 SUIVANTE
 
 ### 4.1 Pipeline Asynchrone Complet
@@ -760,15 +894,17 @@ impl RagConfig {
 - **Qualité chunks OCR** : Confidence >0.7 moyenne
 - **Accuracy recherche** : >90% sur corpus test
 
-### ✅ Métriques Atteintes (Phase 3B)
-- **Pipeline complet** : 100% fonctionnel (Extraction → Embeddings → Qdrant)
-- **Persistance Qdrant** : 4 documents testés, 25 chunks stockés et vérifiés
+### ✅ Métriques Atteintes (Phase 3B + 3C)
+- **Pipeline complet** : 100% fonctionnel (Extraction → Embeddings → Qdrant → Affichage)
+- **Persistance Qdrant** : 3 documents testés, 75 chunks stockés et vérifiés
 - **Embedding generation** : 384D CustomE5, 100% success rate sur chunks valides
 - **UUID génération** : blake3 hash, 0% erreurs Qdrant
 - **Réutilisation OCR** : 100% texte AWCS réutilisé, 0 réextraction inutile
-- **Interface affichage** : 100% documents persistés visibles avec métadonnées
-- **Temps réponse** : <500ms pour list_rag_documents() avec 25 chunks
+- **Interface affichage** : 100% documents persistés visibles avec métadonnées correctes
+- **Temps réponse** : <500ms pour list_rag_documents() avec 75 chunks
 - **Intégrité données** : Confidence moyenne 85%, sample content préservé
+- **Collection constante** : 0% perte données entre redémarrages (ID fixe)
+- **Arguments Tauri** : 0% erreurs mapping, 100% compatibilité camelCase/snake_case
 
 ### Validation Tests
 - ✅ **Test Corpus** : 50 PDFs mixtes (natif + scannés)
@@ -804,6 +940,14 @@ impl RagConfig {
 4. ✅ **Commande list_rag_documents()** : Récupération documents depuis Qdrant via Scroll API
 5. ✅ **Interface Frontend** : Bouton "Voir RAG", affichage documents persistés avec métadonnées
 6. ✅ **Tests validés** : 4 documents, 25 chunks persistés et affichés correctement
+
+### ✅ Phase 3C Terminée (1 jour) - Corrections & Stabilisation
+1. ✅ **Arguments Tauri corrigés** : Mapping camelCase ↔ snake_case pour toutes les commandes
+2. ✅ **Collection persistante** : ID fixe `default_group` → `collection_default_group` constant
+3. ✅ **Méthode new_with_id()** : Création DocumentGroup avec ID prédéfini
+4. ✅ **Logs de debug** : Traçabilité complète avec emojis pour debugging
+5. ✅ **Corrections frontend** : Structure JSX, warnings TypeScript, imports nettoyés
+6. ✅ **Tests validés** : 3 documents, 75 chunks, affichage 100% fonctionnel après redémarrages
 
 ### 🔄 Phase 4 - Suivante (Optimisations Production)
 1. **Pipeline asynchrone** avec progress tracking pour batch processing

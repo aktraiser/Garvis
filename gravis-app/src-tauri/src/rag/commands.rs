@@ -136,6 +136,7 @@ pub struct SearchResultWithMetadata {
     pub business_metadata: Option<BusinessMetadata>,
     pub ocr_confidence: Option<f32>,
     pub chunk_metadata: ChunkMetadataSlim,
+    pub source_file: Option<String>,
 }
 
 /// Métadonnées de chunk simplifiées pour l'API
@@ -211,38 +212,40 @@ pub async fn add_document_intelligent(
         use crate::rag::{GroupDocument, DocumentType, EnrichedChunk, ChunkType, ChunkMetadata, Priority, SourceType, ExtractionMethod, EnrichedMetadata};
         use std::collections::HashMap;
 
-        // Chunking du texte pré-extrait
-        let chunks: Vec<EnrichedChunk> = preextracted_text
-            .split("\n\n")
-            .enumerate()
-            .filter(|(_, para)| !para.trim().is_empty())
-            .map(|(i, para)| {
-                EnrichedChunk {
-                    id: format!("chunk_preextracted_{}_{}", uuid::Uuid::new_v4().simple(), i),
-                    content: para.trim().to_string(),
-                    start_line: i,
-                    end_line: i + 1,
-                    chunk_type: ChunkType::TextBlock,
-                    embedding: None,
-                    hash: blake3::hash(para.trim().as_bytes()).to_hex().to_string(),
-                    metadata: ChunkMetadata {
-                        tags: vec!["pre-extracted".to_string(), "ocr".to_string()],
-                        priority: Priority::Normal,
-                        language: "auto".to_string(),
-                        symbol: None,
-                        context: Some("Pre-extracted by OCR".to_string()),
-                        confidence: 0.85,
-                        ocr_metadata: None,
-                        source_type: SourceType::OcrExtracted,
-                        extraction_method: ExtractionMethod::TesseractOcr {
-                            confidence: 0.85,
-                            language: "fra+eng".to_string(),
-                        },
-                    },
-                    group_id: group_id.clone(),
-                }
-            })
-            .collect();
+        // Chunking intelligent du texte pré-extrait avec la configuration spécifiée
+        use crate::rag::processing::smart_chunker::{SmartChunker, SmartChunkConfig};
+
+        // Convertir chunk_size (caractères) en tokens (approximativement 4 chars = 1 token)
+        let target_tokens = chunk_config.chunk_size / 4;
+        let overlap_percent = (chunk_config.overlap as f32 / chunk_config.chunk_size as f32) * 100.0;
+
+        let smart_config = SmartChunkConfig {
+            target_tokens,
+            overlap_percent,
+            min_tokens: target_tokens / 2,
+            max_tokens: target_tokens + 100,
+            chars_per_token: 4.0,
+            overlap_target_ratio: None,
+            mmr_lambda: 0.5,
+            max_context_docs: 10,
+        };
+
+        let mut chunker = SmartChunker::new(smart_config)
+            .map_err(|e| format!("Failed to create chunker: {}", e))?;
+
+        let extraction_method = ExtractionMethod::TesseractOcr {
+            confidence: 0.85,
+            language: "fra+eng".to_string(),
+        };
+
+        let smart_result = chunker
+            .chunk_document(&preextracted_text, SourceType::OcrExtracted, &extraction_method, &group_id)
+            .map_err(|e| format!("Failed to chunk text: {}", e))?;
+
+        info!("📊 Smart chunking created {} chunks (avg: {:.0} chars, detected {} sections)",
+              smart_result.chunks.len(), smart_result.avg_chunk_size, smart_result.sections_detected.len());
+
+        let chunks = smart_result.chunks;
 
         let document_id = format!("doc_{}", uuid::Uuid::new_v4().simple());
         let now = SystemTime::now();
@@ -289,7 +292,8 @@ pub async fn add_document_intelligent(
         // Ignorer les chunks vides ou d'erreur
         if !chunk.content.trim().is_empty()
             && !chunk.content.starts_with("EXTRACTION FAILED") {
-            match state.embedder.encode(&chunk.content).await {
+            // Utiliser encode_document pour les documents (préfixe "passage:")
+            match state.embedder.encode_document(&chunk.content).await {
                 Ok(embedding) => {
                     chunk.embedding = Some(embedding);
                     embedded_count += 1;
@@ -302,6 +306,14 @@ pub async fn add_document_intelligent(
     }
 
     info!("✅ Generated {} embeddings", embedded_count);
+
+    // === CLASSIFICATION AVANT INJECTION ===
+    // Classification automatique du contenu
+    let document_category = state.document_classifier
+        .classify(&document_with_embeddings.content)
+        .map_err(|e| format!("Classification failed: {}", e))?;
+
+    info!("📊 Document classified as: {:?}", document_category);
 
     // === INJECTION DANS QDRANT ===
     if embedded_count > 0 {
@@ -329,6 +341,24 @@ pub async fn add_document_intelligent(
                     payload.insert("confidence".to_string(), serde_json::json!(chunk.metadata.confidence));
                     payload.insert("chunk_id".to_string(), serde_json::json!(chunk.id.clone()));
 
+                    // Ajouter le nom du fichier source pour l'affichage dans l'interface
+                    if let Some(filename) = document_with_embeddings.file_path.file_name() {
+                        if let Some(filename_str) = filename.to_str() {
+                            payload.insert("source_file".to_string(), serde_json::json!(filename_str));
+                        }
+                    }
+
+                    // Ajouter les métadonnées enrichies du document
+                    if let Some(ref title) = document_with_embeddings.metadata.description {
+                        payload.insert("document_title".to_string(), serde_json::json!(title));
+                    }
+                    if let Some(ref author) = document_with_embeddings.metadata.author {
+                        payload.insert("document_author".to_string(), serde_json::json!(author));
+                    }
+                    payload.insert("document_tags".to_string(), serde_json::json!(document_with_embeddings.metadata.tags));
+                    payload.insert("document_priority".to_string(), serde_json::json!(format!("{:?}", document_with_embeddings.metadata.priority)));
+                    payload.insert("document_category".to_string(), serde_json::json!(format!("{:?}", document_category)));
+
                     // Générer UUID reproductible à partir du chunk.id en utilisant blake3
                     let hash = blake3::hash(chunk.id.as_bytes());
                     let hash_bytes = hash.as_bytes();
@@ -353,11 +383,6 @@ pub async fn add_document_intelligent(
 
         info!("✅ Successfully stored {} chunks in Qdrant", embedded_count);
     }
-
-    // Classification automatique du contenu
-    let document_category = state.document_classifier
-        .classify(&document_with_embeddings.content)
-        .map_err(|e| format!("Classification failed: {}", e))?;
 
     // Enrichissement métadonnées Business si applicable
     let business_metadata = if matches!(document_category, DocumentCategory::Business) {
@@ -544,6 +569,11 @@ pub async fn search_with_metadata(
             None
         };
 
+        // Extraire le nom du fichier source depuis les métadonnées
+        let source_file = payload.get("source_file")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
         let search_result = SearchResultWithMetadata {
             chunk_id,
             content,
@@ -564,6 +594,7 @@ pub async fn search_with_metadata(
                 start_line: 0,
                 end_line: 0,
             },
+            source_file,
         };
 
         results.push(search_result);
@@ -704,11 +735,19 @@ pub async fn list_rag_documents(
 
             let entry = document_map.entry(doc_id.clone()).or_insert_with(|| {
                 RagDocumentInfo {
-                    document_id: doc_id,
+                    document_id: doc_id.clone(),
                     group_id: group_id.clone(),
                     chunks_count: 0,
                     confidence: 0.0,
                     sample_content: String::new(),
+                    source_file: payload.get("source_file").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    document_title: payload.get("document_title").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    document_author: payload.get("document_author").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    document_category: payload.get("document_category").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    document_tags: payload.get("document_tags")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                        .unwrap_or_default(),
                 }
             });
 
@@ -747,6 +786,11 @@ pub struct RagDocumentInfo {
     pub chunks_count: usize,
     pub confidence: f32,
     pub sample_content: String,
+    pub source_file: Option<String>,
+    pub document_title: Option<String>,
+    pub document_author: Option<String>,
+    pub document_category: Option<String>,
+    pub document_tags: Vec<String>,
 }
 
 /// Supprimer un document RAG et tous ses chunks de Qdrant
@@ -853,6 +897,127 @@ pub struct DeleteRagDocumentResponse {
     pub document_id: String,
     pub chunks_deleted: usize,
     pub success: bool,
+}
+
+/// Réponse enrichie pour intégration LLM
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RagContextResponse {
+    pub formatted_context: String,
+    pub sources: Vec<SourceInfo>,
+    pub total_chunks: usize,
+    pub query: String,
+    pub search_time_ms: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SourceInfo {
+    pub document_id: String,
+    pub chunk_id: String,
+    pub content_preview: String,
+    pub score: f32,
+    pub source_file: Option<String>,
+    pub document_category: Option<String>,
+}
+
+/// Interroger le RAG et formater le contexte pour le LLM
+#[tauri::command]
+pub async fn query_rag_with_context(
+    query: String,
+    group_id: String,
+    limit: Option<usize>,
+    state: State<'_, RagState>,
+) -> Result<RagContextResponse, String> {
+    let start_time = std::time::Instant::now();
+    info!("🤖 RAG query for LLM: '{}' in group {}", query, group_id);
+
+    // 1. Recherche dans le RAG
+    let search_params = AdvancedSearchParams {
+        query: query.clone(),
+        group_id: group_id.clone(),
+        limit,
+        min_score: Some(0.5), // Filtrer les résultats peu pertinents
+        document_categories: None,
+        source_types: None,
+        min_ocr_confidence: None,
+        include_business_metadata: true,
+        fiscal_year_filter: None,
+    };
+
+    let search_response = search_with_metadata(search_params, state.clone()).await?;
+
+    // 2. Formater le contexte pour le LLM
+    let mut formatted_context = String::new();
+    formatted_context.push_str(&format!("# Contexte depuis la base de connaissances\n\n"));
+    formatted_context.push_str(&format!("Requête: {}\n\n", query));
+    formatted_context.push_str(&format!("## Documents pertinents ({} résultats)\n\n", search_response.results.len()));
+
+    let mut sources: Vec<SourceInfo> = Vec::new();
+
+    for (idx, result) in search_response.results.iter().enumerate() {
+        // Ajouter au contexte formaté
+        formatted_context.push_str(&format!("### [Source {}] Score: {:.2}%\n", idx + 1, result.score * 100.0));
+
+        if let Some(ref source_file) = result.source_file {
+            formatted_context.push_str(&format!("Fichier: {}\n", source_file));
+        }
+
+        // Format enum as string for display
+        formatted_context.push_str(&format!("Catégorie: {:?}\n", result.document_category));
+
+        formatted_context.push_str(&format!("\nContenu:\n```\n{}\n```\n\n", result.content));
+
+        // Ajouter aux sources avec preview plus long et ellipsis
+        let preview = if result.content.len() > 300 {
+            format!("{}...", result.content.chars().take(300).collect::<String>())
+        } else {
+            result.content.clone()
+        };
+
+        sources.push(SourceInfo {
+            document_id: result.document_id.clone(),
+            chunk_id: result.chunk_id.clone(),
+            content_preview: preview,
+            score: result.score,
+            source_file: result.source_file.clone(),
+            document_category: Some(format!("{:?}", result.document_category)),
+        });
+    }
+
+    formatted_context.push_str(&format!("\n---\n\n"));
+    formatted_context.push_str("**INSTRUCTIONS POUR RÉPONDRE**:\n\n");
+    formatted_context.push_str("1. **Analyse et synthèse**: Lis TOUTES les sources ci-dessus et identifie les informations UNIQUES et COMPLÉMENTAIRES\n");
+    formatted_context.push_str("   - Si plusieurs sources répètent la même information, ne la mentionne qu'UNE SEULE FOIS\n");
+    formatted_context.push_str("   - Combine les informations complémentaires pour construire une réponse cohérente\n\n");
+    formatted_context.push_str("2. **Priorisation**: Les sources sont classées par pertinence (score)\n");
+    formatted_context.push_str("   - Accorde plus de poids aux sources avec un score élevé (>80%)\n");
+    formatted_context.push_str("   - Les sources avec un score faible (<60%) peuvent être moins fiables\n\n");
+    formatted_context.push_str("3. **Citations**: Pour chaque information clé, cite la source correspondante [Source N]\n");
+    formatted_context.push_str("   - Format: \"DeepSeek-OCR utilise la compression 2D [Source 1]\"\n");
+    formatted_context.push_str("   - Regroupe les informations similaires au lieu de répéter\n\n");
+    formatted_context.push_str("4. **Structure**: Organise ta réponse de manière claire\n");
+    formatted_context.push_str("   - Utilise des sections, listes ou paragraphes selon le besoin\n");
+    formatted_context.push_str("   - Va du général au spécifique\n\n");
+    formatted_context.push_str("5. **Honnêteté**:\n");
+    formatted_context.push_str("   - Ne réponds QUE basé sur le contexte fourni\n");
+    formatted_context.push_str("   - Si le contexte manque d'informations critiques, DIS-LE clairement\n");
+    formatted_context.push_str("   - N'invente JAMAIS des détails qui ne sont pas dans les sources\n\n");
+    formatted_context.push_str("6. **Qualité**: Si toutes les sources disent essentiellement la même chose:\n");
+    formatted_context.push_str("   - Synthétise en une seule explication claire\n");
+    formatted_context.push_str("   - Mentionne que l'information est confirmée par plusieurs sources\n");
+    formatted_context.push_str("   - Évite la redondance à tout prix\n\n");
+
+    let search_time = start_time.elapsed().as_millis() as u64;
+
+    info!("✅ RAG context prepared: {} chunks, {} sources, {}ms",
+          search_response.results.len(), sources.len(), search_time);
+
+    Ok(RagContextResponse {
+        formatted_context,
+        sources,
+        total_chunks: search_response.results.len(),
+        query,
+        search_time_ms: search_time,
+    })
 }
 
 // === Fonctions utilitaires ===

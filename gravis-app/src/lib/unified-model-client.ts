@@ -14,7 +14,7 @@ export interface UnifiedModelResponse {
 }
 
 export class UnifiedModelClient {
-  
+
   async getAllAvailableModels(): Promise<UnifiedModelResponse> {
     const allModels: LLMModel[] = [];
     const sources: Array<{
@@ -25,10 +25,14 @@ export class UnifiedModelClient {
       isAvailable: boolean;
     }> = [];
 
-    // 1. Récupérer les modèles depuis les connexions actives
+    // 1. Récupérer les modèles depuis les connexions actives EN PARALLÈLE
     const activeConnections = modelConfigStore.activeConnections;
-    
-    for (const connection of activeConnections) {
+
+    // Track si Ollama a déjà été détecté pour éviter double détection
+    let ollamaAlreadyDetected = false;
+
+    // Créer toutes les promesses de détection en parallèle
+    const connectionPromises = activeConnections.map(async (connection: any) => {
       try {
         let connectionModels: LLMModel[] = [];
         let isAvailable = false;
@@ -39,6 +43,7 @@ export class UnifiedModelClient {
           if (provider.isAvailable) {
             connectionModels = provider.models;
             isAvailable = true;
+            ollamaAlreadyDetected = true; // Marquer Ollama comme déjà détecté
           }
         } else if (connection.type === 'localai') {
           // Récupérer les modèles LocalAI
@@ -47,7 +52,7 @@ export class UnifiedModelClient {
             connectionModels = provider.models;
             isAvailable = true;
           }
-        } else if (connection.type === 'litellm' || !connection.type) {
+        } else if (connection.type?.toLowerCase() === 'litellm' || !connection.type) {
           // Récupérer les modèles LiteLLM
           const client = new LiteLLMClient({
             apiKey: connection.apiKey,
@@ -84,6 +89,67 @@ export class UnifiedModelClient {
             }
           ];
           isAvailable = true;
+        } else if (connection.type === 'Modal') {
+          // Récupérer les modèles Modal via l'API compatible OpenAI
+          const client = new LiteLLMClient({
+            apiKey: connection.apiKey || 'not-needed',
+            baseUrl: connection.baseUrl,
+            model: 'llm'
+          });
+
+          try {
+            const response = await client.getModels();
+            if (response.data && Array.isArray(response.data)) {
+              // Filtrer l'alias 'llm' - ne garder que les vrais noms de modèles
+              connectionModels = response.data
+                .filter((model: any) => model.id !== 'llm' && !model.id.endsWith('/llm'))
+                .map((model: any): LLMModel => ({
+                  id: model.id,
+                  name: model.name || model.id,
+                  provider: connection.name,
+                  description: `Modal vLLM model from ${connection.name}`,
+                  contextWindow: model.context_window || 32768,
+                  capabilities: ['chat', 'streaming']
+                }));
+
+              // Si après filtrage il ne reste aucun modèle, utiliser le nom de connexion
+              if (connectionModels.length === 0) {
+                connectionModels = [{
+                  id: connection.name.toLowerCase().replace(/\s+/g, '-'),
+                  name: connection.name,
+                  provider: 'Modal vLLM',
+                  description: `Modal vLLM model: ${connection.name}`,
+                  contextWindow: 32768,
+                  capabilities: ['chat', 'streaming']
+                }];
+              }
+
+              isAvailable = true;
+            } else {
+              // Fallback si pas de liste de modèles
+              connectionModels = [{
+                id: connection.name.toLowerCase().replace(/\s+/g, '-'),
+                name: connection.name,
+                provider: 'Modal vLLM',
+                description: `Modal vLLM model: ${connection.name}`,
+                contextWindow: 32768,
+                capabilities: ['chat', 'streaming']
+              }];
+              isAvailable = true;
+            }
+          } catch (error) {
+            console.warn(`Failed to fetch models from Modal ${connection.name}:`, error);
+            // Fallback même en cas d'erreur
+            connectionModels = [{
+              id: connection.name.toLowerCase().replace(/\s+/g, '-'),
+              name: connection.name,
+              provider: 'Modal vLLM',
+              description: `Modal vLLM model: ${connection.name}`,
+              contextWindow: 32768,
+              capabilities: ['chat', 'streaming']
+            }];
+            isAvailable = true;
+          }
         }
 
         // Ajouter le préfixe de connexion aux IDs des modèles
@@ -93,32 +159,51 @@ export class UnifiedModelClient {
           provider: connection.name
         }));
 
-        allModels.push(...prefixedModels);
-
-        sources.push({
-          name: connection.name,
-          type: connection.type || 'custom',
-          baseUrl: connection.baseUrl,
-          modelCount: connectionModels.length,
-          isAvailable
-        });
+        return {
+          models: prefixedModels,
+          source: {
+            name: connection.name,
+            type: connection.type || 'custom',
+            baseUrl: connection.baseUrl,
+            modelCount: connectionModels.length,
+            isAvailable
+          },
+          isOllama: connection.type === 'ollama' && isAvailable
+        };
 
       } catch (error) {
         console.error(`Error fetching models from ${connection.name}:`, error);
-        sources.push({
-          name: connection.name,
-          type: connection.type || 'custom',
-          baseUrl: connection.baseUrl,
-          modelCount: 0,
-          isAvailable: false
-        });
+        return {
+          models: [],
+          source: {
+            name: connection.name,
+            type: connection.type || 'custom',
+            baseUrl: connection.baseUrl,
+            modelCount: 0,
+            isAvailable: false
+          },
+          isOllama: false
+        };
+      }
+    });
+
+    // Attendre toutes les connexions en parallèle
+    const connectionResults = await Promise.all(connectionPromises);
+
+    // Fusionner les résultats
+    for (const result of connectionResults) {
+      allModels.push(...result.models);
+      sources.push(result.source);
+      if (result.isOllama) {
+        ollamaAlreadyDetected = true;
       }
     }
 
-    // 1.5. Toujours essayer de détecter Ollama automatiquement (même sans connexion configurée)
-    try {
-      const ollamaDetection = await localModelDetector.detectOllamaModels();
-      if (ollamaDetection.isAvailable && ollamaDetection.models.length > 0) {
+    // 1.5. Essayer de détecter Ollama automatiquement SEULEMENT si pas déjà détecté
+    if (!ollamaAlreadyDetected) {
+      try {
+        const ollamaDetection = await localModelDetector.detectOllamaModels();
+        if (ollamaDetection.isAvailable && ollamaDetection.models.length > 0) {
         // Ajouter les modèles Ollama avec préfixe
         const ollamaModels = ollamaDetection.models.map(model => ({
           ...model,
@@ -136,23 +221,26 @@ export class UnifiedModelClient {
           isAvailable: true
         });
       }
-    } catch (error) {
-      console.log('Ollama auto-detection failed:', error);
+      } catch (error) {
+        console.log('Ollama auto-detection failed:', error);
+      }
     }
 
-    // 2. Ajouter les modèles par défaut seulement si on a des connexions mais pas de modèles
-    if (allModels.length === 0 && activeConnections.length > 0) {
-      // Fallback vers les modèles statiques uniquement si on a des connexions configurées mais qui échouent
-      const { AVAILABLE_MODELS } = await import('./litellm');
-      allModels.push(...AVAILABLE_MODELS);
-      
-      sources.push({
-        name: 'Modèles par défaut',
-        type: 'default',
-        baseUrl: 'built-in',
-        modelCount: AVAILABLE_MODELS.length,
-        isAvailable: true
-      });
+    // 2. Ne PAS ajouter de modèles par défaut si les connexions échouent
+    // Cela force l'utilisateur à vérifier et corriger ses connexions
+    // Une UX honnête est préférable à un fallback silencieux trompeur
+
+    // Si aucun modèle n'a été trouvé, retourner un tableau vide
+    // L'utilisateur verra un message d'erreur clair dans l'UI
+    if (allModels.length === 0) {
+      console.warn('⚠️ Aucun modèle disponible depuis les connexions configurées');
+      if (activeConnections.length > 0) {
+        console.warn('Connexions configurées mais aucune n\'est accessible:',
+          activeConnections.map((c: any) => `${c.name} (${c.type})`).join(', ')
+        );
+      } else {
+        console.warn('Aucune connexion configurée. L\'utilisateur doit ajouter une connexion.');
+      }
     }
 
     return {

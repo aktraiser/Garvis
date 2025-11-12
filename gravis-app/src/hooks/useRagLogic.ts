@@ -1,6 +1,47 @@
 import { useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import type { InjectionMetadata, DocumentInfo } from '@/components/rag/types';
+import type { InjectionMetadata, DocumentInfo, ChunkProfile } from '@/components/rag/types';
+import { CHUNK_PROFILES } from '@/components/rag/types';
+
+// Fonction pour calculer la similarité entre deux textes (Jaccard simple)
+const calculateTextSimilarity = (text1: string, text2: string): number => {
+  const words1 = new Set(text1.toLowerCase().split(/\s+/));
+  const words2 = new Set(text2.toLowerCase().split(/\s+/));
+  
+  const intersection = new Set([...words1].filter(x => words2.has(x)));
+  const union = new Set([...words1, ...words2]);
+  
+  return union.size === 0 ? 0 : intersection.size / union.size;
+};
+
+// Déduplication des résultats RAG par similarité de contenu
+const deduplicateResults = (results: any[]): any[] => {
+  const SIMILARITY_THRESHOLD = 0.7; // 70% de similarité = doublon
+  const deduplicated: any[] = [];
+  
+  for (const result of results) {
+    let isDuplicate = false;
+    
+    for (const existing of deduplicated) {
+      const similarity = calculateTextSimilarity(result.content, existing.content);
+      if (similarity >= SIMILARITY_THRESHOLD) {
+        // Garder celui avec le meilleur score
+        if (result.score > existing.score) {
+          const index = deduplicated.indexOf(existing);
+          deduplicated[index] = result;
+        }
+        isDuplicate = true;
+        break;
+      }
+    }
+    
+    if (!isDuplicate) {
+      deduplicated.push(result);
+    }
+  }
+  
+  return deduplicated.sort((a, b) => b.score - a.score); // Trier par score décroissant
+};
 
 export const useRagLogic = () => {
   const [isProcessing, setIsProcessing] = useState<Record<string, boolean>>({});
@@ -21,11 +62,23 @@ export const useRagLogic = () => {
     priority: 'normal',
     language: 'auto',
     forceOcr: false,
-    chunkSize: 512,
-    chunkOverlap: 50
+    chunkProfile: 'balanced',  // Profil par défaut
+    chunkSize: 384,  // Optimisé pour E5-small-v2 (256-512 tokens idéal)
+    chunkOverlap: 48  // 12.5% d'overlap pour continuité sans redondance
   });
 
 
+
+  // Fonction pour changer le profil de chunking
+  const setChunkProfile = useCallback((profile: ChunkProfile) => {
+    const config = CHUNK_PROFILES[profile];
+    setInjectionMetadata(prev => ({
+      ...prev,
+      chunkProfile: profile,
+      chunkSize: config.chunkSize,
+      chunkOverlap: config.chunkOverlap
+    }));
+  }, []);
 
   const prepareInjectionMetadata = useCallback((docName: string, documents: DocumentInfo[], extractedContent: Record<string, any>) => {
     const doc = documents.find(d => d.name === docName);
@@ -67,8 +120,9 @@ export const useRagLogic = () => {
       priority: 'normal',
       language: extractedDoc?.language || 'auto',
       forceOcr: false,
-      chunkSize: 512,
-      chunkOverlap: 50
+      chunkProfile: 'balanced',
+      chunkSize: 384,
+      chunkOverlap: 48
     });
   }, []);
 
@@ -138,12 +192,24 @@ export const useRagLogic = () => {
       });
       
       console.log('🔍 RAG search results:', searchResults);
-      setRagResults(searchResults.results || []);
       
-      if ((searchResults.results || []).length === 0) {
+      // Déduplication par similarité de contenu
+      const deduplicatedResults = deduplicateResults(searchResults.results || []);
+      console.log(`📊 Déduplication: ${searchResults.results?.length || 0} → ${deduplicatedResults.length} résultats`);
+      
+      setRagResults(deduplicatedResults);
+      
+      if (deduplicatedResults.length === 0) {
         notificationCallback('Aucun résultat trouvé', 'info');
       } else {
-        notificationCallback(`${searchResults.total_results || 0} résultat(s) trouvé(s)`, 'success');
+        const originalCount = searchResults.results?.length || 0;
+        const dedupCount = deduplicatedResults.length;
+        
+        if (originalCount === dedupCount) {
+          notificationCallback(`${dedupCount} résultat(s) trouvé(s)`, 'success');
+        } else {
+          notificationCallback(`${dedupCount} résultat(s) uniques trouvé(s) (${originalCount - dedupCount} doublons filtrés)`, 'success');
+        }
       }
       
     } catch (error) {
@@ -208,11 +274,12 @@ export const useRagLogic = () => {
     isLoadingRagDocs,
     showInjectionModal,
     injectionMetadata,
-    
+
     // Actions
     setRagQuery,
     setShowInjectionModal,
     setInjectionMetadata,
+    setChunkProfile,
     prepareInjectionMetadata,
     handleInjectDocumentWithMetadata,
     handleRagSearch,

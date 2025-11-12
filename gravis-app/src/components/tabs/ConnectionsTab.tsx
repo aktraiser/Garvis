@@ -119,14 +119,14 @@ export const ConnectionsTab: React.FC = () => {
             color: '#ffffff',
             marginBottom: '8px'
           }}>
-            Connexions LiteLLM
+            Connexions
           </h2>
-          <p style={{ 
+          <p style={{
             color: '#9ca3af',
             margin: 0,
             fontSize: '14px'
           }}>
-            Gérez vos connexions aux fournisseurs d'IA
+            Gérez vos connexions aux fournisseurs LiteLLM, VPS, Server
           </p>
         </div>
         <button
@@ -351,7 +351,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({ connection, onSave, onC
         />
         <input
           type="url"
-          placeholder="URL de base (ex: http://localhost:4000)"
+          placeholder="URL de base (ex: http://localhost:4000 ou https://modal.run/v1)"
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.target.value)}
           style={{
@@ -378,6 +378,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({ connection, onSave, onC
           <option value="LiteLLM">LiteLLM</option>
           <option value="OpenAI">OpenAI Direct</option>
           <option value="Anthropic">Anthropic Direct</option>
+          <option value="Modal">Modal vLLM</option>
           <option value="Custom">Custom API</option>
         </select>
       </div>

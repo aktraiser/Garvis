@@ -1619,3 +1619,85 @@ body {
 .metric-stop .metric-label {
   color: #ef4444; /* Red for stop reason */
 }
+
+/* Thinking Section Styles */
+.thinking-section {
+  margin-bottom: 12px;
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 8px;
+  background: rgba(139, 92, 246, 0.05);
+  overflow: hidden;
+}
+
+.thinking-section.live {
+  border-color: rgba(34, 197, 94, 0.4);
+  background: rgba(34, 197, 94, 0.05);
+}
+
+.thinking-header {
+  padding: 8px 12px;
+  background: rgba(139, 92, 246, 0.1);
+  border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: #c4b5fd;
+  transition: background-color 0.2s;
+}
+
+.thinking-header.live {
+  background: rgba(34, 197, 94, 0.1);
+  border-bottom-color: rgba(34, 197, 94, 0.2);
+  color: #86efac;
+}
+
+.thinking-header:hover {
+  background: rgba(139, 92, 246, 0.15);
+}
+
+.thinking-header.live:hover {
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.thinking-toggle {
+  font-size: 10px;
+  transition: transform 0.2s;
+}
+
+.thinking-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.thinking-content {
+  padding: 12px;
+  border-top: 1px solid rgba(139, 92, 246, 0.1);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.thinking-content.live {
+  border-top-color: rgba(34, 197, 94, 0.1);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.thinking-content pre {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #d1d5db;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0;
+}
+
+.thinking-content.live pre {
+  color: #e5e7eb;
+}

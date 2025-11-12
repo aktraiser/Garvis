@@ -97,18 +97,29 @@ impl CustomE5Embedder {
         })
     }
     
-    /// Encode un texte en embedding 384D
+    /// Encode un texte en embedding 384D (pour les requêtes utilisateur)
     pub async fn encode(&self, text: &str) -> Result<Vec<f32>> {
-        // Cache key
-        let cache_key = blake3::hash(text.as_bytes()).to_hex().to_string();
-        
+        self.encode_with_prefix(text, "query").await
+    }
+
+    /// Encode un document en embedding 384D (pour l'indexation)
+    pub async fn encode_document(&self, text: &str) -> Result<Vec<f32>> {
+        self.encode_with_prefix(text, "passage").await
+    }
+
+    /// Encode un texte avec un préfixe spécifique (query ou passage)
+    async fn encode_with_prefix(&self, text: &str, prefix: &str) -> Result<Vec<f32>> {
+        // Cache key incluant le préfixe
+        let cache_input = format!("{}:{}", prefix, text);
+        let cache_key = blake3::hash(cache_input.as_bytes()).to_hex().to_string();
+
         if let Some(cached) = self.cache.get(&cache_key) {
             return Ok(cached.clone());
         }
-        
-        // Préfixer le texte selon E5
-        let prefixed_text = format!("query: {}", text);
-        
+
+        // Préfixer le texte selon E5 (query: ou passage:)
+        let prefixed_text = format!("{}: {}", prefix, text);
+
         // Tokenisation
         let encoding = self.tokenizer
             .encode(prefixed_text, true)
@@ -141,18 +152,21 @@ impl CustomE5Embedder {
                 *val /= token_count as f32;
             }
         }
-        
-        // Normalisation L2
+
+        // Normalisation L2 (critque pour la similarité cosinus)
         let norm: f32 = embedding_sum.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if norm > 0.0 {
+        if norm > 1e-6 {  // Seuil de stabilité numérique
             for val in &mut embedding_sum {
                 *val /= norm;
             }
+        } else {
+            // Si norme trop faible, retourner vecteur nul normalisé
+            tracing::warn!("Embedding norm too small ({}) for text: {}", norm, text);
         }
-        
+
         // Mise en cache
         self.cache.insert(cache_key, embedding_sum.clone());
-        
+
         Ok(embedding_sum)
     }
     

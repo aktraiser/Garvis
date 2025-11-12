@@ -57,24 +57,30 @@ export const ModelsTab: React.FC<ModelsTabProps> = ({
   };
 
   if (isLoading) {
+    const activeConnectionsCount = modelConfigStore.activeConnections.length;
+    const connectionNames = modelConfigStore.activeConnections.map((c: any) => c.name).join(', ');
+
     return (
-      <div style={{ 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'center', 
-        padding: '64px 0' 
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '64px 0'
       }}>
         <div style={{ textAlign: 'center' }}>
-          <Loader2 size={32} style={{ 
-            animation: 'spin 1s linear infinite', 
-            margin: '0 auto 16px', 
-            color: '#3b82f6' 
+          <Loader2 size={32} style={{
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 16px',
+            color: '#3b82f6'
           }} />
           <p style={{ fontSize: '18px', color: '#d1d5db', marginBottom: '8px' }}>
             Chargement des modèles...
           </p>
           <p style={{ fontSize: '14px', color: '#6b7280' }}>
-            Connexion au serveur LiteLLM
+            {activeConnectionsCount === 0
+              ? 'Détection automatique des modèles locaux...'
+              : `Connexion à ${connectionNames}...`
+            }
           </p>
         </div>
       </div>

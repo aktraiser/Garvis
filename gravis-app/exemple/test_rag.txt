@@ -1,9 +1,0 @@
-Ceci est un document de test pour le pipeline RAG.
-
-France Travail certifie que Lucas BOMETON a été admis au bénéfice de l'allocation chômage.
-
-Le chiffre d'affaires s'élève à 1.2 million d'euros.
-
-Revenue for Q3 2023 was  million.
-
-This document contains both French and English text to test the classification system.

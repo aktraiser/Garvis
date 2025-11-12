@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { FileText, Database, Upload, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { FileText, Database } from 'lucide-react';
 import { DocumentsTab } from './rag/tabs/DocumentsTab';
 import { InjectionTab } from './rag/tabs/InjectionTab';
 import { useDocuments } from '../hooks/useDocuments';
@@ -12,21 +12,18 @@ interface RagWindowProps {
 
 export const RagWindow: React.FC<RagWindowProps> = () => {
   console.log('🎯 RagWindow component mounting...');
-  
+
   const [activeTab, setActiveTab] = useState<TabType>('documents');
   
   // Hooks pour la logique
   const {
     documents,
     isLoadingDocuments,
-    isUploading,
     notification,
     extractedContent,
     showExtraction,
     editingContent,
     isEditing,
-    loadDocuments,
-    handleUploadDocument,
     handleDeleteDocument,
     handleViewDocument,
     handleExtractDocument,
@@ -51,6 +48,7 @@ export const RagWindow: React.FC<RagWindowProps> = () => {
     setRagQuery,
     setShowInjectionModal,
     setInjectionMetadata,
+    setChunkProfile,
     prepareInjectionMetadata,
     handleInjectDocumentWithMetadata,
     handleRagSearch,
@@ -72,13 +70,25 @@ export const RagWindow: React.FC<RagWindowProps> = () => {
     handleRagSearch(showNotification);
   };
 
-  const handleLoadRagDocuments = () => {
-    loadRagDocuments(showNotification);
-  };
-
   const handleDeleteRagDocumentWrapper = (documentId: string) => {
     handleDeleteRagDocument(documentId, showNotification);
   };
+
+  // Auto-charger les documents RAG au montage et au changement d'onglet vers "injection"
+  useEffect(() => {
+    if (activeTab === 'injection') {
+      console.log('📚 Auto-loading RAG documents...');
+      loadRagDocuments(showNotification);
+    }
+  }, [activeTab]); // Se déclenche quand on passe à l'onglet injection
+
+  // Aussi charger au montage initial si on est déjà sur injection
+  useEffect(() => {
+    if (activeTab === 'injection') {
+      console.log('📚 Initial load of RAG documents...');
+      loadRagDocuments(showNotification);
+    }
+  }, []); // Une seule fois au montage
 
   return (
     <>
@@ -116,6 +126,19 @@ export const RagWindow: React.FC<RagWindowProps> = () => {
             transform: translateX(0);
             opacity: 1;
           }
+        }
+
+        @keyframes spin {
+          from {
+            transform: rotate(0deg);
+          }
+          to {
+            transform: rotate(360deg);
+          }
+        }
+
+        .spin {
+          animation: spin 1s linear infinite;
         }
       `}</style>
       <div style={{ 
@@ -204,63 +227,6 @@ export const RagWindow: React.FC<RagWindowProps> = () => {
             Injection
           </button>
         </div>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          <button className="icon-button" style={{ padding: '8px 12px' }}>Learn more</button>
-          <button 
-            className="icon-button" 
-            onClick={loadDocuments}
-            disabled={isLoadingDocuments}
-            style={{ 
-              background: 'rgba(255,255,255,0.1)', 
-              padding: '8px 12px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              cursor: isLoadingDocuments ? 'not-allowed' : 'pointer',
-              opacity: isLoadingDocuments ? 0.7 : 1
-            }}
-            title="Recharger la liste des documents"
-          >
-            <RefreshCw size={16} />
-            Recharger
-          </button>
-          <button
-            className="icon-button"
-            onClick={handleUploadDocument}
-            disabled={isUploading}
-            style={{
-              background: isUploading ? '#666' : '#0066cc',
-              padding: '8px 12px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              cursor: isUploading ? 'not-allowed' : 'pointer',
-              opacity: isUploading ? 0.7 : 1
-            }}
-            title="Sélectionner et uploader un document"
-          >
-            <Upload size={16} />
-            {isUploading ? 'Upload...' : 'Upload'}
-          </button>
-          <button
-            className="icon-button"
-            onClick={handleLoadRagDocuments}
-            disabled={isLoadingRagDocs}
-            style={{
-              background: isLoadingRagDocs ? '#666' : '#00aa00',
-              padding: '8px 12px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              cursor: isLoadingRagDocs ? 'not-allowed' : 'pointer',
-              opacity: isLoadingRagDocs ? 0.7 : 1
-            }}
-            title="Voir les documents persistés dans le RAG"
-          >
-            <Database size={16} />
-            {isLoadingRagDocs ? 'Chargement...' : `Voir RAG (${ragDocuments.length})`}
-          </button>
-        </div>
       </div>
 
       {/* Contenu des onglets - Scrollable */}
@@ -306,6 +272,7 @@ export const RagWindow: React.FC<RagWindowProps> = () => {
               onDeleteRagDocument={handleDeleteRagDocumentWrapper}
               onSetShowInjectionModal={setShowInjectionModal}
               onSetInjectionMetadata={setInjectionMetadata}
+              onSetChunkProfile={setChunkProfile}
               onInjectDocument={handleInjectDocument}
               onPrepareInjection={handlePrepareInjection}
             />

@@ -95,8 +95,8 @@ pub struct ChunkConfig {
 impl Default for ChunkConfig {
     fn default() -> Self {
         Self {
-            chunk_size: 512,
-            overlap: 64,
+            chunk_size: 384,   // Optimisé pour E5-small-v2 (256-512 tokens idéal)
+            overlap: 48,       // 12.5% d'overlap pour continuité sans redondance excessive
             strategy: ChunkStrategy::AstFirst,
         }
     }
@@ -337,8 +337,8 @@ mod tests {
     #[test]
     fn test_chunk_config_default() {
         let config = ChunkConfig::default();
-        assert_eq!(config.chunk_size, 512);
-        assert_eq!(config.overlap, 64);
+        assert_eq!(config.chunk_size, 384);
+        assert_eq!(config.overlap, 48);
     }
 
     #[test]

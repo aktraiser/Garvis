@@ -21,7 +21,29 @@ export interface OllamaModel {
 }
 
 export class LocalModelDetector {
-  
+  private readonly TIMEOUT_MS = 3000; // 3 secondes max pour détection locale
+
+  // Helper pour fetch avec timeout
+  private async fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.TIMEOUT_MS);
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      return response;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error(`Timeout après ${this.TIMEOUT_MS}ms`);
+      }
+      throw error;
+    }
+  }
+
   // Détecter les modèles Ollama
   async detectOllamaModels(): Promise<LocalModelProvider> {
     const provider: LocalModelProvider = {
@@ -32,7 +54,7 @@ export class LocalModelDetector {
     };
 
     try {
-      const response = await fetch(`${provider.baseUrl}/api/tags`, {
+      const response = await this.fetchWithTimeout(`${provider.baseUrl}/api/tags`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -71,7 +93,7 @@ export class LocalModelDetector {
     };
 
     try {
-      const response = await fetch(`${provider.baseUrl}/v1/models`);
+      const response = await this.fetchWithTimeout(`${provider.baseUrl}/v1/models`);
       if (response.ok) {
         const data = await response.json();
         provider.isAvailable = true;

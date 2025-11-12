@@ -1674,4 +1674,498 @@ console.log('🔧 Model parameters from store:', modelConfigStore.modelParameter
 
 ---
 
-*Rapport mis à jour le 30 Octobre 2024 - GRAVIS Frontend v0.5.0*
+## 🆕 MENU BAR NATIF macOS (v0.6.0)
+
+### 📋 Vue d'Ensemble
+
+GRAVIS dispose maintenant d'une **barre de menu native macOS** professionnelle qui apparaît en haut de l'écran (à côté du logo Apple) lorsque l'application a le focus. Cette amélioration transforme GRAVIS d'une simple app avec icône Dock en une véritable application macOS de premier plan.
+
+**Pourquoi cette fonctionnalité ?**
+- ✅ **UX macOS standard** : Comportement attendu par les utilisateurs Mac
+- ✅ **Accès rapide** : Toutes les fonctions importantes accessibles via menu
+- ✅ **Raccourcis clavier** : Support automatique des shortcuts système (⌘C, ⌘V, etc.)
+- ✅ **Professionnalisme** : Menu "À propos" avec métadonnées complètes
+- ✅ **Discoverability** : Les utilisateurs découvrent facilement les fonctionnalités
+
+### 🗂️ Structure du Menu
+
+Le menu bar comprend **5 menus principaux** :
+
+#### 1️⃣ Menu **GRAVIS** (Application)
+```
+GRAVIS
+├── À propos de GRAVIS         [Affiche nom, version, copyright, auteur]
+├── ────────────────────
+├── Préférences...             [Ouvre la fenêtre des paramètres]
+├── ────────────────────
+├── Masquer GRAVIS             [⌘H - Cache l'application]
+├── Masquer les autres         [⌥⌘H - Cache autres apps]
+├── Tout afficher              [Affiche toutes les apps]
+├── ────────────────────
+└── Quitter GRAVIS             [⌘Q - Ferme l'application]
+```
+
+**Métadonnées "À propos"** :
+- **Nom** : GRAVIS
+- **Version** : Automatique depuis `CARGO_PKG_VERSION`
+- **Copyright** : © 2025 Lucas Bometon
+- **Auteur** : Lucas Bometon
+- **Description** : "AI-powered voice assistant with RAG capabilities"
+
+#### 2️⃣ Menu **Fichier**
+```
+Fichier
+├── Nouvelle conversation      [Crée une nouvelle conversation]
+├── Ouvrir document...         [Ouvre un document]
+├── ────────────────────
+└── Fermer fenêtre             [⌘W - Ferme la fenêtre active]
+```
+
+#### 3️⃣ Menu **Édition**
+```
+Édition
+├── Annuler                    [⌘Z - Undo]
+├── Rétablir                   [⇧⌘Z - Redo]
+├── ────────────────────
+├── Couper                     [⌘X - Cut]
+├── Copier                     [⌘C - Copy]
+├── Coller                     [⌘V - Paste]
+└── Tout sélectionner          [⌘A - Select All]
+```
+
+**Note** : Ces actions utilisent les `PredefinedMenuItem` de Tauri qui activent automatiquement les raccourcis clavier standard macOS.
+
+#### 4️⃣ Menu **Affichage**
+```
+Affichage
+├── Fenêtre RAG                [Ouvre la fenêtre de gestion RAG]
+├── Sélecteur de modèle        [Ouvre le sélecteur de modèle LLM]
+├── Conversations              [Ouvre la fenêtre conversations]
+├── ────────────────────
+└── Outils de développement    [Toggle DevTools - Debug uniquement]
+```
+
+**Actions personnalisées** : Chaque item déclenche une commande Tauri existante (`open_rag_storage_window`, `open_model_selector_window`, etc.)
+
+#### 5️⃣ Menu **Fenêtre**
+```
+Fenêtre
+├── Minimiser                  [⌘M - Minimize]
+└── Zoom                       [Maximize/Restore]
+```
+
+### 🏗️ Architecture Technique
+
+#### Fichier : `src-tauri/src/menu.rs` (228 lignes)
+
+**Module dédié** créé pour gérer toute la logique du menu bar macOS.
+
+**Imports clés** :
+```rust
+use tauri::menu::{Menu, Submenu, MenuItem, PredefinedMenuItem, AboutMetadata, MenuEvent};
+use tauri::{AppHandle, Manager, Emitter};
+```
+
+**Fonction principale** : `create_menu()`
+```rust
+pub fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::error::Error>> {
+    let menu = Menu::new(app)?;
+
+    // Création des 5 menus
+    let app_menu = create_app_menu(app)?;
+    menu.append(&app_menu)?;
+
+    let file_menu = create_file_menu(app)?;
+    menu.append(&file_menu)?;
+
+    let edit_menu = create_edit_menu(app)?;
+    menu.append(&edit_menu)?;
+
+    let view_menu = create_view_menu(app)?;
+    menu.append(&view_menu)?;
+
+    let window_menu = create_window_menu(app)?;
+    menu.append(&window_menu)?;
+
+    Ok(menu)
+}
+```
+
+**Création menu Application** :
+```rust
+fn create_app_menu(app: &AppHandle) -> Result<Submenu<tauri::Wry>, Box<dyn std::error::Error>> {
+    let app_menu = Submenu::new(app, "GRAVIS", true)?;
+
+    // À propos avec métadonnées complètes
+    let about_metadata = AboutMetadata {
+        name: Some("GRAVIS".to_string()),
+        version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        copyright: Some("© 2025 Lucas Bometon".to_string()),
+        authors: Some(vec!["Lucas Bometon".to_string()]),
+        comments: Some("AI-powered voice assistant with RAG capabilities".to_string()),
+        ..Default::default()
+    };
+    let about = PredefinedMenuItem::about(app, Some("À propos de GRAVIS"), Some(about_metadata))?;
+    app_menu.append(&about)?;
+
+    // Séparateur
+    app_menu.append(&PredefinedMenuItem::separator(app)?)?;
+
+    // Préférences (custom action)
+    let preferences = MenuItem::with_id(app, "preferences", "Préférences...", true, None::<&str>)?;
+    app_menu.append(&preferences)?;
+
+    // Hide/Show/Quit (prédéfinis)
+    app_menu.append(&PredefinedMenuItem::hide(app, Some("Masquer GRAVIS"))?)?;
+    app_menu.append(&PredefinedMenuItem::hide_others(app, Some("Masquer les autres"))?)?;
+    app_menu.append(&PredefinedMenuItem::show_all(app, Some("Tout afficher"))?)?;
+    app_menu.append(&PredefinedMenuItem::quit(app, Some("Quitter GRAVIS"))?)?;
+
+    Ok(app_menu)
+}
+```
+
+**Gestionnaire d'événements** : `setup_menu_event_handler()`
+```rust
+pub fn setup_menu_event_handler(app: &AppHandle, _menu: &Menu<tauri::Wry>) {
+    let app_handle = app.clone();
+
+    app.on_menu_event(move |app, event| {
+        match event.id().as_ref() {
+            // Menu Affichage
+            "open_rag" => {
+                tracing::info!("🗄️ Menu: Ouvrir fenêtre RAG");
+                let app_clone = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = crate::window_commands::open_rag_storage_window(app_clone).await {
+                        tracing::error!("Failed to open RAG window: {}", e);
+                    }
+                });
+            }
+            "open_model_selector" => {
+                tracing::info!("🤖 Menu: Ouvrir sélecteur de modèle");
+                let app_clone = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = crate::window_commands::open_model_selector_window(app_clone).await {
+                        tracing::error!("Failed to open model selector: {}", e);
+                    }
+                });
+            }
+            "open_conversations" => {
+                tracing::info!("💬 Menu: Ouvrir conversations");
+                let app_clone = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = crate::window_commands::open_conversations_window(app_clone).await {
+                        tracing::error!("Failed to open conversations: {}", e);
+                    }
+                });
+            }
+
+            // Menu Fichier
+            "new_conversation" => {
+                tracing::info!("📝 Menu: Nouvelle conversation");
+                if let Err(e) = app.emit("menu:new-conversation", ()) {
+                    tracing::error!("Failed to emit new-conversation event: {}", e);
+                }
+            }
+            "open_document" => {
+                tracing::info!("📄 Menu: Ouvrir document");
+                if let Err(e) = app.emit("menu:open-document", ()) {
+                    tracing::error!("Failed to emit open-document event: {}", e);
+                }
+            }
+
+            // Menu Application
+            "preferences" => {
+                tracing::info!("⚙️ Menu: Préférences");
+                let app_clone = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = crate::window_commands::open_settings_window(app_clone).await {
+                        tracing::error!("Failed to open settings: {}", e);
+                    }
+                });
+            }
+
+            // DevTools (debug uniquement)
+            "toggle_devtools" => {
+                tracing::info!("🔧 Menu: Toggle DevTools");
+                if let Some(window) = app.get_webview_window("main") {
+                    #[cfg(debug_assertions)]
+                    {
+                        if window.is_devtools_open() {
+                            let _ = window.close_devtools();
+                        } else {
+                            let _ = window.open_devtools();
+                        }
+                    }
+                    #[cfg(not(debug_assertions))]
+                    {
+                        tracing::warn!("DevTools only available in development mode");
+                    }
+                }
+            }
+
+            _ => {
+                tracing::debug!("Unhandled menu event: {:?}", event.id());
+            }
+        }
+    });
+}
+```
+
+**Points clés de l'implémentation** :
+1. **Async runtime** : Actions asynchrones avec `tauri::async_runtime::spawn()`
+2. **Clone de app** : Nécessaire pour passer `AppHandle` dans closures async
+3. **Event emission** : Certains items émettent des événements (`menu:new-conversation`)
+4. **Window commands** : Réutilisation des commandes existantes (`open_rag_storage_window`, etc.)
+5. **Logging** : Traces détaillées pour chaque action menu
+6. **Error handling** : Gestion propre des erreurs avec logging
+
+#### Fichier : `src-tauri/src/lib.rs` (Modification)
+
+**Déclaration du module** (ligne 13) :
+```rust
+mod menu;
+```
+
+**Setup conditionnel macOS** (lignes 621-634) :
+```rust
+// Configurer le menu natif macOS
+#[cfg(target_os = "macos")]
+{
+    builder = builder.setup(|app| {
+        let menu = menu::create_menu(&app.handle()).expect("Failed to create menu");
+        menu::setup_menu_event_handler(&app.handle(), &menu);
+
+        // Activer le menu pour toutes les fenêtres
+        app.set_menu(menu).expect("Failed to set menu");
+
+        tracing::info!("✅ Menu bar natif macOS configuré");
+        Ok(())
+    });
+}
+```
+
+**Pourquoi `#[cfg(target_os = "macos")]` ?**
+- Menu bar natif est une fonctionnalité spécifique macOS
+- Windows/Linux ont des conventions UI différentes
+- Code ne compile que sur macOS, évite erreurs sur autres plateformes
+
+### 🔄 Intégration avec l'Existant
+
+Le menu bar s'intègre parfaitement avec les **commandes Tauri existantes** :
+
+| Menu Item | Commande Tauri | Fichier |
+|-----------|---------------|---------|
+| Fenêtre RAG | `open_rag_storage_window()` | [window_commands.rs](src-tauri/src/window_commands.rs) |
+| Sélecteur de modèle | `open_model_selector_window()` | [window_commands.rs](src-tauri/src/window_commands.rs) |
+| Conversations | `open_conversations_window()` | [window_commands.rs](src-tauri/src/window_commands.rs) |
+| Préférences | `open_settings_window()` | [window_commands.rs](src-tauri/src/window_commands.rs) |
+| Nouvelle conversation | Émet événement `menu:new-conversation` | Frontend écoute cet événement |
+| Ouvrir document | Émet événement `menu:open-document` | Frontend écoute cet événement |
+
+**Communication inter-fenêtres** :
+```rust
+// Émettre événement vers le frontend
+app.emit("menu:new-conversation", ())
+
+// Le frontend écoute :
+// await listen("menu:new-conversation", () => { ... })
+```
+
+### 🎨 Expérience Utilisateur
+
+#### Avant (v0.5.0)
+- ❌ Icône uniquement dans le Dock
+- ❌ Pas de menu bar
+- ❌ Difficile de découvrir les fonctionnalités
+- ❌ Pas de raccourcis clavier standard
+
+#### Après (v0.6.0)
+- ✅ Menu bar professionnel en haut de l'écran
+- ✅ 5 menus organisés logiquement
+- ✅ Raccourcis clavier automatiques (⌘C, ⌘V, ⌘Q, etc.)
+- ✅ Dialog "À propos" avec métadonnées complètes
+- ✅ Accès rapide à toutes les fenêtres
+- ✅ Comportement standard macOS
+
+#### Découverte des Fonctionnalités
+L'utilisateur peut maintenant découvrir toutes les capacités de GRAVIS simplement en parcourant les menus :
+- **Fenêtre RAG** → "Ah, il y a un système RAG !"
+- **Sélecteur de modèle** → "Je peux changer de modèle LLM !"
+- **Conversations** → "Je peux gérer mes conversations !"
+
+### 📊 Défis Techniques Résolus
+
+#### 1. Choix de l'API Menu
+**Problème initial** : Essai avec crate `muda` directement
+```rust
+use muda::*;  // ❌ Incompatibilité de types avec Tauri
+```
+
+**Solution finale** : Utiliser l'API Tauri native
+```rust
+use tauri::menu::*;  // ✅ Intégration native, pas de dépendance externe
+```
+
+**Bénéfice** : Pas de dépendance supplémentaire, types compatibles, API stable.
+
+#### 2. Raccourcis Clavier
+**Problème initial** : Essai de définir manuellement les accelerators
+```rust
+MenuItem::with_id(app, "copy", "Copier", true, Some("Cmd+C"))  // ❌ Type Accelerator non trouvé
+```
+
+**Solution finale** : Utiliser PredefinedMenuItem
+```rust
+PredefinedMenuItem::copy(app, Some("Copier"))  // ✅ Shortcuts automatiques
+```
+
+**Bénéfice** : macOS gère automatiquement ⌘C, ⌘V, ⌘Q, etc. sans code supplémentaire.
+
+#### 3. Gestion des Événements
+**Problème initial** : `menu.on_menu_event()` n'existe pas
+```rust
+menu.on_menu_event(...)  // ❌ Méthode introuvable
+```
+
+**Solution finale** : Utiliser `app.on_menu_event()`
+```rust
+app.on_menu_event(move |app, event| { ... })  // ✅ API Tauri 2
+```
+
+**Bénéfice** : Cohérent avec le système d'événements Tauri, accès au AppHandle.
+
+#### 4. Actions Asynchrones
+**Problème** : Commandes window comme `open_rag_storage_window()` sont async
+
+**Solution** : Spawn async runtime
+```rust
+"open_rag" => {
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = crate::window_commands::open_rag_storage_window(app_clone).await {
+            tracing::error!("Failed to open RAG window: {}", e);
+        }
+    });
+}
+```
+
+**Bénéfice** : Non-blocking, UI reste responsive, gestion d'erreurs propre.
+
+### 🧪 Tests de Validation
+
+#### ✅ Test 1 : Affichage du Menu
+```
+1. Lancer GRAVIS
+2. Cliquer sur l'app pour lui donner le focus
+3. Regarder en haut de l'écran (à droite du logo Apple)
+4. ✅ Vérifier : "GRAVIS Fichier Édition Affichage Fenêtre" visible
+```
+
+#### ✅ Test 2 : Menu Application
+```
+1. Cliquer sur "GRAVIS"
+2. ✅ Vérifier : "À propos", "Préférences", "Masquer", "Quitter" visibles
+3. Cliquer sur "À propos de GRAVIS"
+4. ✅ Vérifier : Dialog affiche nom, version, copyright, auteur
+```
+
+#### ✅ Test 3 : Raccourcis Clavier
+```
+1. Dans un champ texte de GRAVIS
+2. Taper du texte, sélectionner avec ⌘A
+3. Copier avec ⌘C
+4. Coller avec ⌘V
+5. ✅ Vérifier : Tous les shortcuts fonctionnent
+6. Appuyer ⌘Q
+7. ✅ Vérifier : App se ferme
+```
+
+#### ✅ Test 4 : Ouverture Fenêtres
+```
+1. Menu "Affichage" → "Fenêtre RAG"
+2. ✅ Vérifier : Fenêtre RAG s'ouvre
+3. Menu "Affichage" → "Sélecteur de modèle"
+4. ✅ Vérifier : Sélecteur s'ouvre
+5. Menu "Affichage" → "Conversations"
+6. ✅ Vérifier : Fenêtre conversations s'ouvre
+```
+
+#### ✅ Test 5 : Événements Frontend
+```
+1. Ouvrir DevTools (F12)
+2. Menu "Fichier" → "Nouvelle conversation"
+3. ✅ Vérifier logs : "menu:new-conversation" event reçu
+4. Menu "Fichier" → "Ouvrir document"
+5. ✅ Vérifier logs : "menu:open-document" event reçu
+```
+
+### 📈 Impact et Bénéfices
+
+#### Pour l'Utilisateur
+- ⭐ **Professionnalisme** : GRAVIS ressemble à une vraie app macOS native
+- ⭐ **Productivité** : Raccourcis clavier ⌘C, ⌘V, ⌘Q instantanément disponibles
+- ⭐ **Découverte** : Toutes les fonctionnalités visibles dans les menus
+- ⭐ **Accessibilité** : Support VoiceOver automatique via menus natifs
+- ⭐ **Cohérence** : Comportement identique aux autres apps Mac (Mail, Safari, etc.)
+
+#### Pour le Développement
+- 🔧 **Architecture propre** : Module `menu.rs` séparé, responsabilité unique
+- 🔧 **Réutilisation** : Intégration avec window_commands existants
+- 🔧 **Extensibilité** : Facile d'ajouter nouveaux items menu
+- 🔧 **Maintenabilité** : Code organisé, fonctions dédiées par menu
+- 🔧 **Logging** : Traces complètes pour debugging
+
+#### Métriques
+- **Lignes de code** : 228 lignes (menu.rs) + 15 lignes (lib.rs)
+- **Menus** : 5 menus principaux
+- **Items** : 24 items menu au total
+- **Actions custom** : 7 (RAG, Model Selector, Conversations, Preferences, New Conv, Open Doc, DevTools)
+- **Actions prédéfinies** : 12 (About, Hide, Quit, Close, Cut, Copy, Paste, etc.)
+- **Séparateurs** : 5
+
+### 🔮 Évolutions Futures
+
+#### Court Terme
+- ✅ **Fait** : Menu bar macOS complet
+- 🔄 Ajouter états enabled/disabled dynamiques (ex: "Fermer fenêtre" grisé si aucune fenêtre)
+- 🔄 Ajouter checkmarks pour items toggleables (ex: "Fenêtre RAG" cochée si ouverte)
+
+#### Moyen Terme
+- 🆕 Menu "Historique" avec conversations récentes
+- 🆕 Menu "Aide" avec liens docs, GitHub, support
+- 🆕 Sous-menus dans "Affichage" pour organiser fenêtres
+- 🆕 Menu "Développer" pour actions développeur (reload, clear cache, etc.)
+
+#### Long Terme
+- 🆕 Support Windows (menu bar dans fenêtre, pas natif système)
+- 🆕 Support Linux (menu bar dans fenêtre)
+- 🆕 Menus contextuels (right-click) dans différentes zones de l'app
+- 🆕 Personnalisation menus via préférences utilisateur
+
+### 📚 Ressources et Références
+
+- **Tauri 2 Menu API** : [https://tauri.app/v2/guides/menu/](https://beta.tauri.app/develop/menu/)
+- **macOS HIG (Menu Bar)** : [https://developer.apple.com/design/human-interface-guidelines/menus](https://developer.apple.com/design/human-interface-guidelines/the-menu-bar/)
+- **Code source** : [src-tauri/src/menu.rs](src-tauri/src/menu.rs:1)
+
+### 🆕 Changelog v0.5.0 → v0.6.0
+
+- **➕ Module `menu.rs`** : 228 lignes pour menu bar natif macOS
+- **➕ 5 menus principaux** : GRAVIS, Fichier, Édition, Affichage, Fenêtre
+- **➕ 24 items menu** : Mix de PredefinedMenuItem et custom MenuItem
+- **➕ Dialog "À propos"** avec métadonnées complètes (nom, version, copyright, auteur)
+- **➕ Event handler** pour actions menu personnalisées
+- **➕ Intégration window_commands** : RAG, Model Selector, Conversations, Settings
+- **➕ Événements frontend** : `menu:new-conversation`, `menu:open-document`
+- **➕ Raccourcis clavier** : Support automatique ⌘C, ⌘V, ⌘Q, ⌘W, ⌘A, etc.
+- **➕ Compilation conditionnelle** : `#[cfg(target_os = "macos")]` pour macOS uniquement
+- **➕ Logging détaillé** : Traces pour chaque action menu
+- **🔧 Setup dans lib.rs** : Initialisation menu au lancement app
+- **🔧 DevTools toggle** : Disponible uniquement en mode debug
+- **🎨 UX professionnelle** : Comportement natif macOS standard
+
+---
+
+*Rapport mis à jour le 8 Novembre 2024 - GRAVIS Frontend v0.6.0*

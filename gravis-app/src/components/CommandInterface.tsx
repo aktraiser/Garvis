@@ -9,11 +9,11 @@ import { ModelSelectorWindow } from './ModelSelectorWindow';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
-import { 
-  Plus, 
-  Globe, 
+import {
+  Plus,
+  Globe,
   FileText,
-  Radio, 
+  Radio,
   Mic,
   Send,
   Settings,
@@ -25,11 +25,91 @@ import {
   Copy,
   Volume2,
   RotateCcw,
-  MessageSquare
+  MessageSquare,
+  Database
 } from "lucide-react";
 import { LiteLLMClient, modelConfigStore } from "@/lib/litellm";
 import { tauriModelStore } from "@/lib/tauri-model-store";
 import { conversationManager } from "@/lib/conversation-manager";
+import { useRagQuery, type RagContextResponse } from "@/hooks/useRagQuery";
+
+// Fonction pour détecter les boucles infinies dans le thinking
+const detectThinkingLoop = (text: string): boolean => {
+  // Détecter les répétitions extrêmes de mots très courts (uniquement "the the the...")
+  const extremeWordLoop = /\b(the|a|an|in|on|at|of|to|for)\s+\1(\s+\1){10,}/gi;
+  if (extremeWordLoop.test(text)) {
+    console.log('⚠️ Detected extreme word loop in thinking');
+    return true;
+  }
+  
+  // Détecter seulement si le thinking dépasse 3000 caractères (très long)
+  if (text.length > 3000) {
+    console.log('⚠️ Thinking too long, potential loop');
+    return true;
+  }
+  
+  return false;
+};
+
+// Fonction pour nettoyer le thinking des boucles
+const cleanThinkingLoops = (text: string): string => {
+  console.log('🧹 Cleaning thinking loops, original length:', text.length);
+  
+  // Supprimer seulement les répétitions extrêmes de mots très courts (10+ fois)
+  text = text.replace(/\b(the|a|an|in|on|at|of|to|for)(\s+\1){10,}/gi, '$1 [loop detected and cleaned]');
+  
+  // Limiter la longueur du thinking à 2500 caractères max (plus généreux)
+  if (text.length > 2500) {
+    text = text.substring(0, 2500) + '\n\n[Thinking truncated - too long]';
+  }
+  
+  console.log('🧹 Cleaned thinking length:', text.length);
+  return text;
+};
+
+// Fonction pour parser le thinking dans le stream
+const parseThinkingStream = (content: string) => {
+  console.log('🔍 Parsing content length:', content.length);
+  
+  let thinkingContent = "";
+  let mainContent = content;
+  
+  // Regex plus robuste pour capturer le thinking
+  const thinkRegex = /<think>\s*([\s\S]*?)\s*<\/think>/g;
+  let match;
+  
+  // Extraire tout le contenu thinking
+  while ((match = thinkRegex.exec(content)) !== null) {
+    const extracted = match[1].trim();
+    if (extracted) {
+      thinkingContent += (thinkingContent ? "\n\n" : "") + extracted;
+    }
+  }
+  
+  // Nettoyer les boucles infinies dans le thinking
+  if (thinkingContent && detectThinkingLoop(thinkingContent)) {
+    console.log('🚨 Loop detected in thinking, before cleaning:', thinkingContent.length, 'chars');
+    thinkingContent = cleanThinkingLoops(thinkingContent);
+    console.log('🔧 Cleaned thinking loops, after:', thinkingContent.length, 'chars');
+  } else if (thinkingContent) {
+    console.log('✅ Normal thinking, no loops detected:', thinkingContent.length, 'chars');
+  }
+  
+  // Supprimer complètement les balises thinking du contenu principal
+  mainContent = content
+    .replace(/<think>\s*[\s\S]*?\s*<\/think>/g, '')  // Supprimer blocs complets
+    .replace(/<think>/g, '')  // Supprimer balises ouvertes orphelines
+    .replace(/<\/think>/g, '') // Supprimer balises fermées orphelines
+    .trim(); // Nettoyer les espaces
+  
+  console.log('🧠 Thinking extracted:', thinkingContent.length, 'chars');
+  console.log('📝 Main content after cleaning:', mainContent.length, 'chars');
+  
+  return {
+    thinking: thinkingContent,
+    content: mainContent
+  };
+};
 
 export function CommandInterface() {
   const [query, setQuery] = useState("");
@@ -45,6 +125,12 @@ export function CommandInterface() {
   const [showRagWindow, setShowRagWindow] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [textareaHeight, setTextareaHeight] = useState(20);
+
+  // RAG integration
+  const [useRag, setUseRag] = useState(false);
+  const [ragCollection] = useState('default_group'); // TODO: Add UI to select collection
+  const [expandedSource, setExpandedSource] = useState<{messageId: string, sourceIdx: number} | null>(null);
+  const { queryRagWithContext } = useRagQuery();
   
   const openRagWindow = async () => {
     try {
@@ -93,6 +179,7 @@ export function CommandInterface() {
     content: string;
     thinking?: string;
     timestamp: Date;
+    ragSources?: RagContextResponse;
     metrics?: {
       tokensPerSecond?: number;
       totalTokens?: number;
@@ -434,20 +521,21 @@ Question à propos de ce contenu : `;
   }, [conversationHistory.length, isProcessing, textareaHeight]);
 
   // Helper function to add assistant response to conversation history
-  const addAssistantResponse = (content: string, thinkingContent?: string, metrics?: any) => {
+  const addAssistantResponse = (content: string, thinkingContent?: string, metrics?: any, ragSources?: RagContextResponse) => {
     // Ajouter la réponse de l'assistant au gestionnaire de conversations
     if (conversationManager.getCurrentConversation()) {
       conversationManager.addMessage('assistant', content);
       conversationManager.saveCurrentConversation();
       console.log('💾 Réponse assistant sauvegardée dans la conversation');
     }
-    
+
     const assistantMessage = {
       id: (Date.now() + 1).toString(),
       type: 'assistant' as const,
       content,
       thinking: thinkingContent,
       timestamp: new Date(),
+      ragSources,
       metrics
     };
     setConversationHistory(prev => [...prev, assistantMessage]);
@@ -470,6 +558,12 @@ Question à propos de ce contenu : `;
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim() || isProcessing) return;
+
+    // Vérifier qu'un modèle valide est sélectionné
+    if (!currentModel || !currentModel.id || currentModel.id === '') {
+      alert('Veuillez sélectionner un modèle avant d\'envoyer un message.');
+      return;
+    }
 
     const userQuery = query.trim();
     
@@ -542,6 +636,8 @@ Question à propos de ce contenu : `;
       const supportsThinking = currentModel.id.includes('deepseek-reasoner') || 
                               currentModel.id.includes('thinking') ||
                               currentModel.id.includes('deepseek') ||
+                              currentModel.id.includes('Qwen3-8B-FP8') || // Modal Qwen3-8B-FP8 has thinking
+                              currentModel.provider?.includes('Modal') || // All Modal models potentially have thinking
                               (currentModel.description && currentModel.description.toLowerCase().includes('reasoning'));
       
       console.log('Current model:', currentModel);
@@ -554,15 +650,39 @@ Question à propos de ce contenu : `;
       console.log('🔧 Creating LiteLLMClient with config:', config);
       const client = new LiteLLMClient(config);
       console.log('✅ LiteLLMClient created successfully');
-      
+
+      // RAG Context Integration
+      let ragContextText = "";
+      let ragSources: RagContextResponse | null = null;
+
+      if (useRag) {
+        console.log('🔍 RAG enabled, querying collection:', ragCollection);
+        const ragResponse = await queryRagWithContext({
+          query: userQuery,
+          groupId: ragCollection,
+          limit: 5
+        });
+
+        if (ragResponse && ragResponse.total_chunks > 0) {
+          ragContextText = ragResponse.formatted_context;
+          ragSources = ragResponse;
+          console.log(`✅ RAG context retrieved: ${ragResponse.total_chunks} chunks from ${ragResponse.sources.length} sources`);
+        } else {
+          console.log('⚠️ No RAG context found for query');
+        }
+      }
+
+      // Build messages with optional RAG context
       const messages = [
         {
           role: "system",
           content: `RÔLE OBLIGATOIRE : ${currentSystemPrompt || "Tu es GRAVIS, un assistant spécialisé dans l'audit et l'analyse de code. Réponds de manière concise et professionnelle."} Tu DOIS impérativement respecter ce rôle dans toutes tes réponses.`
         },
         {
-          role: "user", 
-          content: userQuery
+          role: "user",
+          content: ragContextText
+            ? `${ragContextText}\n\n---\n\n**Question de l'utilisateur**: ${userQuery}`
+            : userQuery
         }
       ];
       
@@ -594,12 +714,11 @@ Question à propos de ce contenu : `;
                     if (parsed.choices && parsed.choices[0]) {
                       const delta = parsed.choices[0].delta;
                       
-                      // Handle reasoning content
+                      // Handle reasoning content (DeepSeek format)
                       if (delta.reasoning) {
                         fullThinking += delta.reasoning;
                         setThinking(fullThinking);
-                        console.log('Thinking received, length:', fullThinking.length);
-                        console.log('States - isThinking:', isThinking, 'thinking exists:', !!fullThinking);
+                        console.log('🧠 DeepSeek thinking received, length:', fullThinking.length);
                       }
                       
                       // Handle main content
@@ -608,8 +727,27 @@ Question à propos de ce contenu : `;
                         if (!firstTokenTime && delta.content.trim()) {
                           firstTokenTime = Date.now();
                         }
+                        
                         fullResponse += delta.content;
-                        setResponse(fullResponse);
+                        
+                        // Parse thinking from content (Modal/vLLM format)
+                        const parsed = parseThinkingStream(fullResponse);
+                        
+                        if (parsed.thinking && parsed.thinking !== fullThinking) {
+                          fullThinking = parsed.thinking;
+                          
+                          // Protection contre les boucles infinies en temps réel (désactivée temporairement)
+                          // if (detectThinkingLoop(fullThinking)) {
+                          //   fullThinking = cleanThinkingLoops(fullThinking);
+                          //   console.log('🔧 Real-time loop protection activated');
+                          // }
+                          
+                          setThinking(fullThinking);
+                          console.log('🧠 Modal thinking parsed, length:', fullThinking.length);
+                        }
+                        
+                        // Set only the main content without thinking tags
+                        setResponse(parsed.content);
                       }
                     }
                   } catch (e) {
@@ -641,9 +779,10 @@ Question à propos de ce contenu : `;
           processingTime: processingTime
         };
 
-        // Add streaming response to conversation history
+        // Add streaming response to conversation history (with cleaned content)
         if (fullResponse) {
-          addAssistantResponse(fullResponse, fullThinking, metrics);
+          const finalParsed = parseThinkingStream(fullResponse);
+          addAssistantResponse(finalParsed.content, fullThinking || finalParsed.thinking, metrics, ragSources || undefined);
         }
       } else {
         // Non-thinking models use regular chat
@@ -683,16 +822,27 @@ Question à propos de ce contenu : `;
           };
           
           // Handle thinking models (like DeepSeek) - fallback for non-streaming
+          let finalThinking = "";
+          let finalContent = choice.message.content;
+          
           if (choice.message.reasoning) {
             console.log('Found reasoning:', choice.message.reasoning);
-            setThinking(choice.message.reasoning);
-            setShowThinking(true);
+            finalThinking = choice.message.reasoning;
+            setThinking(finalThinking);
+          } else {
+            // Parse thinking from content if present (Modal format)
+            const parsed = parseThinkingStream(choice.message.content);
+            if (parsed.thinking) {
+              finalThinking = parsed.thinking;
+              finalContent = parsed.content;
+              setThinking(finalThinking);
+            }
           }
           
-          setResponse(choice.message.content);
-          
+          setResponse(finalContent);
+
           // Add assistant response to conversation history
-          addAssistantResponse(choice.message.content, choice.message.reasoning, metrics);
+          addAssistantResponse(finalContent, finalThinking, metrics, ragSources || undefined);
         } else {
           const errorMessage = "❌ Erreur: Réponse invalide du modèle";
           setResponse(errorMessage);
@@ -771,20 +921,36 @@ Question à propos de ce contenu : `;
         </form>
         
         {/* AWCS Global Shortcut Tip */}
-        <div className="shortcut-tip" style={{ 
-          fontSize: '11px', 
-          color: '#666', 
-          textAlign: 'left', 
+        <div className="shortcut-tip" style={{
+          fontSize: '11px',
+          color: '#666',
+          textAlign: 'left',
           marginTop: '4px',
           opacity: 0.8
         }}>
-          Astuce : Utilisez <kbd style={{ 
-            background: '#f0f0f0', 
-            padding: '1px 4px', 
+          Astuce : Utilisez <kbd style={{
+            background: '#f0f0f0',
+            padding: '1px 4px',
             borderRadius: '3px',
-            fontSize: '10px' 
+            fontSize: '10px'
           }}>⌘⇧⌃L</kbd> depuis n'importe quelle app pour extraire du contenu
         </div>
+
+        {/* RAG Status Indicator */}
+        {useRag && (
+          <div style={{
+            fontSize: '11px',
+            color: '#10b981',
+            textAlign: 'left',
+            marginTop: '4px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px'
+          }}>
+            <Database size={12} />
+            <span>RAG activé • Collection: {ragCollection}</span>
+          </div>
+        )}
       </div>
 
       {/* Action buttons */}
@@ -815,13 +981,25 @@ Question à propos de ce contenu : `;
           >
             <Globe size={14} />
           </button>
-          <button 
-            type="button" 
-            className="icon-button" 
+          <button
+            type="button"
+            className="icon-button"
             title="RAG - Gestion des documents"
             onClick={openRagWindow}
           >
             <FileText size={14} />
+          </button>
+          <button
+            type="button"
+            className={`icon-button ${useRag ? 'active' : ''}`}
+            title={useRag ? "RAG activé - Cliquez pour désactiver" : "RAG désactivé - Cliquez pour activer"}
+            onClick={() => setUseRag(!useRag)}
+            style={{
+              backgroundColor: useRag ? '#10b981' : 'transparent',
+              color: useRag ? 'white' : 'inherit'
+            }}
+          >
+            <Database size={14} />
           </button>
           <button type="button" className="icon-button" title="MCP">
             <Radio size={14} />
@@ -889,6 +1067,23 @@ Question à propos de ce contenu : `;
                 </div>
               ) : (
                 <div className="assistant-message">
+                  {/* Thinking section */}
+                  {message.thinking && (
+                    <div className="thinking-section">
+                      <div className="thinking-header" onClick={() => {
+                        const thinkingContent = document.getElementById(`thinking-${message.id}`);
+                        if (thinkingContent) {
+                          thinkingContent.style.display = thinkingContent.style.display === 'none' ? 'block' : 'none';
+                        }
+                      }}>
+                        <span>🧠 Réflexion du modèle</span>
+                        <span className="thinking-toggle">▼</span>
+                      </div>
+                      <div id={`thinking-${message.id}`} className="thinking-content" style={{display: 'none'}}>
+                        <pre>{message.thinking}</pre>
+                      </div>
+                    </div>
+                  )}
                   <div className="assistant-content">
                     <ReactMarkdown 
                       remarkPlugins={[remarkGfm]}
@@ -922,6 +1117,97 @@ Question à propos de ce contenu : `;
                     </ReactMarkdown>
                   </div>
                   
+                  {/* RAG Sources */}
+                  {message.ragSources && message.ragSources.sources.length > 0 && (
+                    <div style={{
+                      marginTop: '12px',
+                      padding: '12px',
+                      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                      borderLeft: '3px solid #10b981',
+                      borderRadius: '4px',
+                      fontSize: '12px'
+                    }}>
+                      <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#10b981' }}>
+                        📚 Sources RAG ({message.ragSources.total_chunks} chunks en {message.ragSources.search_time_ms}ms)
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {message.ragSources.sources.map((source, idx) => {
+                          const isExpanded = expandedSource?.messageId === message.id && expandedSource?.sourceIdx === idx;
+                          return (
+                            <div key={source.chunk_id} style={{
+                              padding: '8px',
+                              backgroundColor: 'rgba(255, 255, 255, 0.5)',
+                              borderRadius: '4px',
+                              fontSize: '11px',
+                              cursor: 'pointer',
+                              border: isExpanded ? '2px solid #10b981' : '1px solid rgba(0,0,0,0.1)',
+                              transition: 'all 0.2s'
+                            }}
+                            onClick={() => {
+                              if (isExpanded) {
+                                setExpandedSource(null);
+                              } else {
+                                setExpandedSource({ messageId: message.id, sourceIdx: idx });
+                              }
+                            }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                                <span style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{
+                                    backgroundColor: '#10b981',
+                                    color: 'white',
+                                    padding: '2px 6px',
+                                    borderRadius: '3px',
+                                    fontSize: '10px'
+                                  }}>
+                                    Source {idx + 1}
+                                  </span>
+                                  {source.source_file || 'Document'}
+                                </span>
+                                <span style={{ color: '#10b981', fontWeight: 'bold' }}>
+                                  {(source.score * 100).toFixed(1)}%
+                                </span>
+                              </div>
+                              {source.document_category && (
+                                <div style={{
+                                  marginBottom: '6px',
+                                  fontSize: '10px',
+                                  display: 'inline-block',
+                                  padding: '2px 6px',
+                                  backgroundColor: '#e0e7ff',
+                                  color: '#4338ca',
+                                  borderRadius: '3px'
+                                }}>
+                                  {source.document_category}
+                                </div>
+                              )}
+                              <div style={{
+                                color: '#555',
+                                fontStyle: 'italic',
+                                marginTop: '6px',
+                                maxHeight: isExpanded ? 'none' : '40px',
+                                overflow: isExpanded ? 'visible' : 'hidden',
+                                lineHeight: '1.4'
+                              }}>
+                                {source.content_preview}
+                              </div>
+                              {!isExpanded && (
+                                <div style={{
+                                  marginTop: '4px',
+                                  color: '#10b981',
+                                  fontSize: '10px',
+                                  textAlign: 'right'
+                                }}>
+                                  📖 Cliquez pour voir plus...
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Performance metrics */}
                   {message.metrics && (
                     <div className="performance-metrics">
@@ -971,14 +1257,41 @@ Question à propos de ce contenu : `;
           {isProcessing && (
             <div className="chat-message assistant">
               <div className="assistant-message">
-                <div className="processing-indicator">
-                  <div className="processing-dots">
-                    <span></span>
-                    <span></span>
-                    <span></span>
+                {/* Thinking section en temps réel */}
+                {thinking && (
+                  <div className="thinking-section live">
+                    <div className="thinking-header live">
+                      <span>🧠 Réflexion en cours...</span>
+                      <Loader2 className="thinking-spinner" size={16} style={{animation: 'spin 1s linear infinite'}} />
+                    </div>
+                    <div className="thinking-content live">
+                      <pre>{thinking}</pre>
+                    </div>
                   </div>
-                  <span>Traitement en cours...</span>
-                </div>
+                )}
+                
+                {/* Réponse en temps réel */}
+                {response && (
+                  <div className="assistant-content live">
+                    <ReactMarkdown 
+                      remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[rehypeHighlight]}
+                    >
+                      {response}
+                    </ReactMarkdown>
+                  </div>
+                )}
+                
+                {!response && !thinking && (
+                  <div className="processing-indicator">
+                    <div className="processing-dots">
+                      <span></span>
+                      <span></span>
+                      <span></span>
+                    </div>
+                    <span>Traitement en cours...</span>
+                  </div>
+                )}
               </div>
             </div>
           )}

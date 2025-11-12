@@ -120,26 +120,90 @@ export class LiteLLMClient {
       };
     }
     
-    // Pour les autres modèles, utiliser la configuration LiteLLM
+    // Pour les modèles LiteLLM, utiliser la connexion LiteLLM correspondante
+    if (currentModel.provider?.includes('LiteLLM') || 
+        currentModel.id.startsWith('LiteLLM/') ||
+        currentModel.id.startsWith('litellm/')) {
+      console.log('✅ Detected LiteLLM model:', currentModel);
+      
+      // Trouver la connexion LiteLLM dans les connexions actives
+      const litellmConnection = modelConfigStore.activeConnections.find((conn: any) => 
+        conn.type?.toLowerCase() === 'litellm' || conn.name.includes('LiteLLM')
+      );
+      
+      if (litellmConnection) {
+        console.log('✅ Found LiteLLM connection:', litellmConnection);
+        return {
+          baseUrl: litellmConnection.baseUrl,
+          apiKey: litellmConnection.apiKey,
+          modelName: currentModel.name || currentModel.id.split('/').pop() || currentModel.id
+        };
+      }
+    }
+    
+    // Pour les modèles Modal, utiliser la connexion Modal
+    if (currentModel.provider?.includes('Modal') || 
+        currentModel.id.startsWith('Modal/')) {
+      console.log('✅ Using Modal endpoint for:', currentModel);
+      
+      // Trouver la connexion Modal dans les connexions actives
+      const modalConnection = modelConfigStore.activeConnections.find((conn: any) => 
+        conn.type === 'Modal' || conn.name.includes('Modal')
+      );
+      
+      if (modalConnection) {
+        console.log('✅ Found Modal connection:', modalConnection);
+        return {
+          baseUrl: modalConnection.baseUrl,
+          apiKey: modalConnection.apiKey || 'not-needed',
+          modelName: 'llm' // Modal utilise toujours "llm" comme nom de modèle
+        };
+      }
+    }
+    
+    // Pour les autres modèles (LiteLLM), utiliser la connexion active
+    if (modelConfigStore.selectedConnectionId) {
+      const selectedConnection = modelConfigStore.activeConnections.find((conn: any) => 
+        conn.id === modelConfigStore.selectedConnectionId
+      );
+      if (selectedConnection) {
+        console.log('✅ Using selected LiteLLM connection for inference:', selectedConnection);
+        return {
+          baseUrl: selectedConnection.baseUrl,
+          apiKey: selectedConnection.apiKey,
+          modelName: currentModel.id.includes('/') ? 
+            currentModel.id.split('/')[1] : 
+            currentModel.id
+        };
+      }
+    }
+
+    // Fallback vers la configuration par défaut
     return {
       baseUrl: this.baseUrl,
       apiKey: this.config.apiKey,
-      modelName: currentModel.id.startsWith('litellm/') ? 
-        currentModel.id.replace('litellm/', '') : 
+      modelName: currentModel.id.includes('/') ? 
+        currentModel.id.split('/')[1] : 
         currentModel.id
     };
   }
 
   async chat(messages: Array<{ role: string; content: string }>) {
     try {
+      console.log('🚀 LiteLLMClient.chat() called with messages:', messages);
       const endpoint = this.getEndpointForModel();
+      console.log('🔗 Endpoint details:', endpoint);
+      
       const headers: { [key: string]: string } = {
         "Content-Type": "application/json",
       };
       
       // Ajouter l'autorisation seulement si une clé API est fournie
-      if (endpoint.apiKey) {
+      if (endpoint.apiKey && endpoint.apiKey !== 'not-needed') {
         headers["Authorization"] = `Bearer ${endpoint.apiKey}`;
+        console.log('🔑 Added Authorization header');
+      } else {
+        console.log('⚪ No API key or not-needed - skipping auth header');
       }
       
       // Utiliser l'endpoint correct selon le provider
@@ -147,32 +211,56 @@ export class LiteLLMClient {
       const isOllamaProvider = currentModel.provider === 'Ollama' || 
                               currentModel.provider === 'Ollama (Local)' || 
                               currentModel.id.startsWith('ollama/');
-      const apiEndpoint = isOllamaProvider ? 
-        `${endpoint.baseUrl}/v1/chat/completions` : 
-        `${endpoint.baseUrl}/chat/completions`;
+      const isModalProvider = currentModel.provider?.includes('Modal') || 
+                             currentModel.id.startsWith('Modal/');
+      
+      let apiEndpoint;
+      if (isOllamaProvider) {
+        apiEndpoint = `${endpoint.baseUrl}/v1/chat/completions`;
+      } else if (isModalProvider) {
+        // Pour Modal, vérifier si l'URL se termine déjà par /v1
+        const baseUrl = endpoint.baseUrl.endsWith('/v1') ? 
+          endpoint.baseUrl : 
+          `${endpoint.baseUrl}/v1`;
+        apiEndpoint = `${baseUrl}/chat/completions`;
+      } else {
+        apiEndpoint = `${endpoint.baseUrl}/chat/completions`;
+      }
       
       console.log('🎯 Final API endpoint:', apiEndpoint);
+      console.log('🎯 Headers:', headers);
+      
+      const requestBody = {
+        model: endpoint.modelName,
+        messages,
+        temperature: this.config.temperature || 0.7,
+        max_tokens: this.config.maxTokens || 2000,
+        top_p: this.config.topP || 1.0,
+        frequency_penalty: this.config.frequencyPenalty || 0.0,
+        presence_penalty: this.config.presencePenalty || 0.0,
+        stream: false,
+      };
+      
+      console.log('📦 Request body:', requestBody);
       
       const response = await fetch(apiEndpoint, {
         method: "POST",
         headers,
-        body: JSON.stringify({
-          model: endpoint.modelName,
-          messages,
-          temperature: this.config.temperature || 0.7,
-          max_tokens: this.config.maxTokens || 2000,
-          top_p: this.config.topP || 1.0,
-          frequency_penalty: this.config.frequencyPenalty || 0.0,
-          presence_penalty: this.config.presencePenalty || 0.0,
-          stream: false,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
+      console.log('📡 Response status:', response.status);
+      console.log('📡 Response headers:', Object.fromEntries(response.headers.entries()));
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        console.error('❌ API Error Response:', errorText);
+        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
       }
 
-      return await response.json();
+      const result = await response.json();
+      console.log('✅ API Success Response:', result);
+      return result;
     } catch (error) {
       console.error("LiteLLM API error:", error);
       throw error;
@@ -196,9 +284,21 @@ export class LiteLLMClient {
       const isOllamaProvider = currentModel.provider === 'Ollama' || 
                               currentModel.provider === 'Ollama (Local)' || 
                               currentModel.id.startsWith('ollama/');
-      const apiEndpoint = isOllamaProvider ? 
-        `${endpoint.baseUrl}/v1/chat/completions` : 
-        `${endpoint.baseUrl}/chat/completions`;
+      const isModalProvider = currentModel.provider?.includes('Modal') || 
+                             currentModel.id.startsWith('Modal/');
+      
+      let apiEndpoint;
+      if (isOllamaProvider) {
+        apiEndpoint = `${endpoint.baseUrl}/v1/chat/completions`;
+      } else if (isModalProvider) {
+        // Pour Modal, vérifier si l'URL se termine déjà par /v1
+        const baseUrl = endpoint.baseUrl.endsWith('/v1') ? 
+          endpoint.baseUrl : 
+          `${endpoint.baseUrl}/v1`;
+        apiEndpoint = `${baseUrl}/chat/completions`;
+      } else {
+        apiEndpoint = `${endpoint.baseUrl}/chat/completions`;
+      }
       
       console.log('🎯 Final API endpoint:', apiEndpoint);
       
@@ -229,30 +329,41 @@ export class LiteLLMClient {
   }
 
   async getModels() {
-    // Si aucune connexion n'est configurée, retourner une liste vide
-    if (modelConfigStore.activeConnections.length === 0 && !modelConfigStore.selectedConnectionId) {
-      return { data: [] };
-    }
-
     try {
+      // Timeout de 10 secondes pour éviter les attentes longues
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      console.log('🔍 getModels: Fetching from', this.baseUrl);
+      console.log('🔍 getModels: Using API key:', this.config.apiKey ? 'Present' : 'Missing');
+
       const response = await fetch(`${this.baseUrl}/models`, {
         headers: {
           "Authorization": `Bearer ${this.config.apiKey}`,
         },
+        signal: controller.signal
       });
 
+      clearTimeout(timeoutId);
+
+      console.log('📡 getModels response status:', response.status);
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        console.error('❌ getModels API Error:', errorText);
+        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
       }
 
-      return await response.json();
+      const result = await response.json();
+      console.log('✅ getModels success:', result);
+      return result;
     } catch (error) {
-      console.error("Failed to fetch models:", error);
-      // Si on a des connexions mais que ça échoue, retourner les modèles par défaut
-      if (modelConfigStore.activeConnections.length > 0 || modelConfigStore.selectedConnectionId) {
-        return { data: AVAILABLE_MODELS };
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.error("Timeout lors de la récupération des modèles depuis", this.baseUrl);
+      } else {
+        console.error("Failed to fetch models from", this.baseUrl, ":", error);
       }
-      // Sinon, liste vide
+      console.warn('⚠️ getModels: Échec de connexion, retour liste vide');
       return { data: [] };
     }
   }
@@ -287,28 +398,58 @@ export const getModelById = async (id: string): Promise<LLMModel | undefined> =>
     return staticModel;
   }
   
-  // 2. Si c'est un modèle Ollama, essayer de le créer dynamiquement
-  if (id.startsWith('ollama/')) {
-    try {
-      const { localModelDetector } = await import('./local-models');
-      const ollamaDetection = await localModelDetector.detectOllamaModels();
+  // 2. Si c'est un modèle avec préfixe (LiteLLM/, ollama/, etc.), créer dynamiquement
+  if (id.includes('/')) {
+    const [prefix, modelName] = id.split('/', 2);
+    
+    // Pour les modèles LiteLLM
+    if (prefix.toLowerCase() === 'litellm') {
+      // Chercher le modèle de base dans AVAILABLE_MODELS
+      const baseModel = AVAILABLE_MODELS.find(model => 
+        model.id === modelName || model.name === modelName
+      );
       
-      if (ollamaDetection.isAvailable) {
-        const modelName = id.replace('ollama/', '');
-        const ollamaModel = ollamaDetection.models.find(model => 
-          model.name === modelName || model.id === modelName || model.id === id
-        );
-        
-        if (ollamaModel) {
-          return {
-            ...ollamaModel,
-            id: id,
-            provider: 'Ollama (Local)'
-          };
-        }
+      if (baseModel) {
+        return {
+          ...baseModel,
+          id: id,
+          provider: 'LiteLLM Server'
+        };
       }
-    } catch (error) {
-      console.warn('Failed to detect Ollama model for getModelById:', error);
+      
+      // Fallback: créer un modèle générique
+      return {
+        id: id,
+        name: modelName,
+        provider: 'LiteLLM Server',
+        description: `LiteLLM model: ${modelName}`,
+        contextWindow: 4096,
+        capabilities: []
+      };
+    }
+    
+    // Pour les modèles Ollama
+    if (prefix === 'ollama') {
+      try {
+        const { localModelDetector } = await import('./local-models');
+        const ollamaDetection = await localModelDetector.detectOllamaModels();
+        
+        if (ollamaDetection.isAvailable) {
+          const ollamaModel = ollamaDetection.models.find(model => 
+            model.name === modelName || model.id === modelName || model.id === id
+          );
+          
+          if (ollamaModel) {
+            return {
+              ...ollamaModel,
+              id: id,
+              provider: 'Ollama (Local)'
+            };
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to detect Ollama model for getModelById:', error);
+      }
     }
   }
   
@@ -320,7 +461,15 @@ export const getModelsByProvider = (provider: string): LLMModel[] => {
 };
 
 export const getDefaultModel = (): LLMModel => {
-  return AVAILABLE_MODELS[0]; // GPT-4o as default
+  // Ne pas retourner de modèle par défaut - forcer l'utilisateur à en choisir un
+  return {
+    id: '',
+    name: 'No Model',
+    provider: 'None',
+    description: 'No model selected',
+    contextWindow: 0,
+    capabilities: []
+  };
 };
 
 // Store configuration with localStorage persistence
@@ -432,8 +581,33 @@ export const modelConfigStore: any = {
   getConfig: (): LLMConfig => {
     console.log('🔧 getConfig called');
     console.log('🔧 Current model ID:', modelConfigStore.currentModel.id);
+    console.log('🔧 Current model provider:', modelConfigStore.currentModel.provider);
     console.log('🔧 Selected connection ID:', modelConfigStore.selectedConnectionId);
     console.log('🔧 Active connections:', modelConfigStore.activeConnections);
+    
+    // Détection automatique pour modèles LiteLLM
+    if (modelConfigStore.currentModel.id.startsWith('LiteLLM/') || 
+        modelConfigStore.currentModel.id.startsWith('litellm/') ||
+        modelConfigStore.currentModel.provider?.includes('LiteLLM')) {
+      console.log('✅ Auto-detected LiteLLM model, searching for LiteLLM connection');
+      
+      // Trouver la connexion LiteLLM dans les connexions actives
+      const litellmConnection = modelConfigStore.activeConnections.find((conn: any) => 
+        conn.type?.toLowerCase() === 'litellm' || conn.name.includes('LiteLLM')
+      );
+      
+      if (litellmConnection) {
+        console.log('✅ Found LiteLLM connection for auto-config:', litellmConnection);
+        return {
+          apiKey: litellmConnection.apiKey,
+          baseUrl: litellmConnection.baseUrl,
+          model: modelConfigStore.currentModel.id,
+          ...modelConfigStore.modelParameters,
+        };
+      } else {
+        console.warn('⚠️ LiteLLM model detected but no LiteLLM connection found');
+      }
+    }
     
     // Utiliser la connexion sélectionnée si elle existe
     if (modelConfigStore.selectedConnectionId) {
@@ -460,6 +634,29 @@ export const modelConfigStore: any = {
         model: modelConfigStore.currentModel.id,
         ...modelConfigStore.modelParameters,
       };
+    }
+    
+    // Détection automatique pour modèles Modal
+    if (modelConfigStore.currentModel.id.startsWith('Modal/') || 
+        modelConfigStore.currentModel.provider?.includes('Modal')) {
+      console.log('✅ Auto-detected Modal model, searching for Modal connection');
+      
+      // Trouver la connexion Modal dans les connexions actives
+      const modalConnection = modelConfigStore.activeConnections.find((conn: any) => 
+        conn.type === 'Modal' || conn.name.includes('Modal')
+      );
+      
+      if (modalConnection) {
+        console.log('✅ Found Modal connection for auto-config:', modalConnection);
+        return {
+          apiKey: modalConnection.apiKey || 'not-needed',
+          baseUrl: modalConnection.baseUrl,
+          model: modelConfigStore.currentModel.id,
+          ...modelConfigStore.modelParameters,
+        };
+      } else {
+        console.warn('⚠️ Modal model detected but no Modal connection found');
+      }
     }
     
     // Fallback vers les valeurs directes (legacy)

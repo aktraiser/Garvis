@@ -9,6 +9,10 @@ pub mod awcs;
 mod ext_server;
 // Window management commands
 mod window_commands;
+// Menu bar natif macOS
+mod menu;
+// System tray / Menu bar icon
+mod tray;
 
 use rag::{DocumentGroup, OcrState, RagState};
 use std::path::Path;
@@ -19,7 +23,7 @@ use rag::ocr::commands::{
     ocr_get_version, ocr_get_cache_stats, ocr_clear_cache, ocr_get_config
 };
 use rag::commands::{
-    add_document_intelligent, search_with_metadata, get_document_metadata, list_rag_documents, delete_rag_document
+    add_document_intelligent, search_with_metadata, get_document_metadata, list_rag_documents, delete_rag_document, query_rag_with_context
 };
 use awcs::AWCSState;
 use awcs::commands::{
@@ -592,7 +596,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Créer l'état AWCS Phase 2 (incrémental)
     let awcs_state = AWCSState::new();
 
-    let app_handle = tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(
@@ -602,10 +606,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .with_handler(|app, shortcut, event| {
                     use tauri_plugin_global_shortcut::ShortcutState;
                     use tauri::Emitter;
-                    
+
                     if event.state == ShortcutState::Pressed {
                         tracing::info!("AWCS Phase 4: Global shortcut triggered! {}", shortcut);
-                        
+
                         // Émettre l'événement pour le frontend
                         if let Err(e) = app.emit("awcs-shortcut-triggered", serde_json::json!({})) {
                             tracing::error!("Failed to emit shortcut event: {}", e);
@@ -616,8 +620,36 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         )
         .manage(ocr_state)
         .manage(rag_state)
-        .manage(awcs_state)
-        .invoke_handler(tauri::generate_handler![
+        .manage(awcs_state);
+
+    // Configurer le menu natif macOS et le system tray
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.setup(|app| {
+            let menu = menu::create_menu(&app.handle()).expect("Failed to create menu");
+            menu::setup_menu_event_handler(&app.handle(), &menu);
+
+            // Activer le menu pour toutes les fenêtres
+            app.set_menu(menu).expect("Failed to set menu");
+
+            // Créer l'icône système (system tray)
+            tray::create_tray(&app.handle()).expect("Failed to create system tray");
+
+            tracing::info!("✅ Menu bar natif macOS configuré");
+            Ok(())
+        });
+    }
+
+    // Configurer le system tray pour les autres OS
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder = builder.setup(|app| {
+            tray::create_tray(&app.handle()).expect("Failed to create system tray");
+            Ok(())
+        });
+    }
+
+    let app_handle = builder.invoke_handler(tauri::generate_handler![
             greet,
             // Window Management Commands
             open_rag_storage_window,
@@ -653,6 +685,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             get_document_metadata,
             list_rag_documents,
             delete_rag_document,
+            query_rag_with_context,
             // AWCS Commands Phase 1 - Core
             awcs_get_current_context,
             awcs_handle_query,
