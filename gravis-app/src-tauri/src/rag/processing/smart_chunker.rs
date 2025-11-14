@@ -572,6 +572,7 @@ impl SmartChunker {
                 extraction_method: extraction_method.clone(),
             },
             group_id: group_id.to_string(),
+            source_spans: None,
         };
 
         chunk.generate_hash();

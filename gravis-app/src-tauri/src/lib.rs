@@ -14,7 +14,7 @@ mod menu;
 // System tray / Menu bar icon
 mod tray;
 
-use rag::{DocumentGroup, OcrState, RagState};
+use rag::{DocumentGroup, OcrState, RagState, DirectChatState};
 use std::path::Path;
 use uuid;
 use tauri::State;
@@ -25,6 +25,10 @@ use rag::ocr::commands::{
 use rag::commands::{
     add_document_intelligent, search_with_metadata, get_document_metadata, list_rag_documents, delete_rag_document, query_rag_with_context
 };
+use rag::direct_chat_commands::{
+    process_dropped_document, chat_with_dropped_document, get_direct_chat_session, 
+    cleanup_direct_chat_session, get_direct_chat_stats, list_direct_chat_sessions, cleanup_expired_sessions
+};
 use awcs::AWCSState;
 use awcs::commands::{
     awcs_get_current_context, awcs_handle_query, awcs_check_permissions, awcs_request_permissions,
@@ -32,7 +36,7 @@ use awcs::commands::{
     awcs_get_config, awcs_update_config, awcs_open_system_preferences, awcs_show_zone_selector,
     awcs_trigger_shortcut, awcs_test_extraction, awcs_get_context_ocr_direct, awcs_get_context_focused_ocr
 };
-use window_commands::{open_rag_storage_window, open_settings_window, open_model_selector_window, open_conversations_window, emit_model_changed, emit_parameters_changed, broadcast_to_window, get_active_windows, close_specific_window};
+use window_commands::{open_rag_storage_window, open_settings_window, open_model_selector_window, open_conversations_window, emit_model_changed, emit_parameters_changed, broadcast_to_window, get_active_windows, close_specific_window, open_ocr_viewer_window, close_ocr_viewer_window, update_ocr_viewer_highlights};
 
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -593,6 +597,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         e
     })?;
     
+    // Créer l'état Chat Direct Phase 2
+    let direct_chat_state = DirectChatState::new(rag_state.embedder.clone()).await.map_err(|e| {
+        tracing::error!("Failed to initialize DirectChatState: {}", e);
+        e
+    })?;
+    
     // Créer l'état AWCS Phase 2 (incrémental)
     let awcs_state = AWCSState::new();
 
@@ -620,6 +630,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         )
         .manage(ocr_state)
         .manage(rag_state)
+        .manage(direct_chat_state)
         .manage(awcs_state);
 
     // Configurer le menu natif macOS et le system tray
@@ -661,6 +672,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             emit_parameters_changed,
             broadcast_to_window,
             get_active_windows,
+            open_ocr_viewer_window,
+            close_ocr_viewer_window,
+            update_ocr_viewer_highlights,
             // RAG Commands Phase 1
             rag_create_group,
             rag_list_groups,
@@ -703,7 +717,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             awcs_trigger_shortcut,
             awcs_test_extraction,
             awcs_get_context_ocr_direct,
-            awcs_get_context_focused_ocr
+            awcs_get_context_focused_ocr,
+            // Phase 2: Chat Direct Commands
+            process_dropped_document,
+            chat_with_dropped_document,
+            get_direct_chat_session,
+            cleanup_direct_chat_session,
+            get_direct_chat_stats,
+            list_direct_chat_sessions,
+            cleanup_expired_sessions
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

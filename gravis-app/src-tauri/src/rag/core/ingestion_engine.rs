@@ -298,7 +298,7 @@ impl CacheStats {
 mod tests {
     use super::*;
     use crate::rag::ocr::{TesseractProcessor, TesseractConfig};
-    use crate::rag::custom_e5::{CustomE5Embedder, CustomE5Config};
+    use crate::rag::search::custom_e5::{CustomE5Embedder, CustomE5Config};
 
     #[tokio::test]
     async fn test_strategy_detector() {
@@ -318,7 +318,7 @@ mod tests {
         let e5_config = CustomE5Config::default();
         let embedder = CustomE5Embedder::new(e5_config).await.unwrap();
         
-        let document_processor = DocumentProcessor::new(ocr_processor, embedder).await.unwrap();
+        let document_processor = DocumentProcessor::new(ocr_processor, std::sync::Arc::new(embedder)).await.unwrap();
         let _engine = IngestionEngine::new(document_processor);
         
         // Si on arrive ici, la création a réussi

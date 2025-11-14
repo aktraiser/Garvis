@@ -329,7 +329,7 @@ mod tests {
     async fn test_unified_cache_creation() {
         let cache_config = CacheConfig::default();
         let ocr_config = OcrConfig::default();
-        let ocr_cache = OcrCache::new(cache_config, ocr_config).unwrap();
+        let ocr_cache = OcrCache::new(cache_config).await.unwrap();
         
         let unified_cache = UnifiedCache::new(ocr_cache);
         let metrics = unified_cache.get_cache_metrics();
@@ -342,7 +342,7 @@ mod tests {
     async fn test_cache_key_generation() {
         let cache_config = CacheConfig::default();
         let ocr_config = OcrConfig::default();
-        let ocr_cache = OcrCache::new(cache_config, ocr_config).unwrap();
+        let ocr_cache = OcrCache::new(cache_config).await.unwrap();
         let unified_cache = UnifiedCache::new(ocr_cache);
 
         let temp_file = NamedTempFile::new().unwrap();
@@ -367,7 +367,7 @@ mod tests {
     async fn test_embedding_cache() {
         let cache_config = CacheConfig::default();
         let ocr_config = OcrConfig::default();
-        let ocr_cache = OcrCache::new(cache_config, ocr_config).unwrap();
+        let ocr_cache = OcrCache::new(cache_config).await.unwrap();
         let unified_cache = UnifiedCache::new(ocr_cache);
 
         let chunk_hash = "test_chunk_hash";

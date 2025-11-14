@@ -806,9 +806,473 @@ return (
 
 ---
 
-## **Phase 4: Optimisations Production (4 jours)** 🔄 SUIVANTE
+## **Phase 4: RAG Industriel v2.0 - Optimisations Production (3-4 semaines)** 🔄 SUIVANTE
 
-### 4.1 Pipeline Asynchrone Complet
+### 📋 Patch Plan Intégré - 12 PRs Structurées
+
+**Phase 4A - Fondations Robustes** (2 semaines, 5 PRs) :
+- **PR #1: Source Spans & Traçabilité** - bbox + char offsets pour explainability
+- **PR #2: Embedding Schema Versioning** - Anti-vector drift + migration auto
+- **PR #3: IDs Déterministes** - blake3(doc+span+content) zero duplicates  
+- **PR #4: SimHash Deduplication** - Near-duplicate detection intelligent
+- **PR #5: Métriques HDR** - Histogrammes P95 + observabilité production
+
+**Phase 4B - Sécurité & Qualité** (1 semaine, 3 PRs) :
+- **PR #6: PII Redaction & Sanitization** - Compliance entreprise automatique
+- **PR #7: Back-pressure & Concurrency Control** - Semaphores + retry intelligent
+- **PR #8: Advanced Search & Filtering** - Hybrid scoring + filtres multi-critères
+
+**Phase 4C - Bridge GCEL Prep** (1 semaine, 2 PRs) :
+- **PR #9: Export/Import Bundle Foundation** - Prep architecture GCEL cooperative
+- **PR #10: Schema Migration & Compatibility** - Évolutivité long terme
+
+**Phase Test & Load** (parallèle, 1 semaine, 2 PRs) :
+- **PR #11: Golden Tests & Property Tests** - Snapshots + fuzz + property testing
+- **PR #12: Load Tests & Benchmarks** - 1k pages stress test + memory profiling
+
+### 🎯 Transition vers GCEL Coopératif
+
+Cette phase 4 prépare les fondations critiques pour la **Phase 5 GCEL** :
+- Source spans → explainability des sandboxes partagés
+- Schema versioning → compatibility entre utilisateurs GRAVIS  
+- Dedup intelligent → qualité des bundles coopératifs
+- Bundle export → base pour pinning décentralisé
+
+---
+
+## 🌐 **Phase 5: Partage Coopératif des Embeddings (GCEL) – Filecoin Pin (PoC R&D)** 🚀 NOUVEAU
+
+**Durée** : 5-7 jours  
+**Objectif** : Transformer GRAVIS d'un RAG offline vers un RAG coopératif décentralisé
+
+### 🔬 5.0 Scope & Limites (Filecoin-Pin)
+
+> ⚠️ **ATTENTION - PROOF OF CONCEPT R&D UNIQUEMENT**
+> 
+> Cette phase est conçue exclusivement pour la **recherche et développement (R&D)**. 
+> L'intégration Filecoin-Pin est limitée au **testnet Calibration** et n'est **pas destinée à un usage production**.
+>
+> **Limitations techniques identifiées** :
+> - 🧪 **Testnet uniquement** : Filecoin Calibration, pas de mainnet
+> - ⏰ **Données temporaires** : Storage deals testnet peuvent être perdus
+> - 🔧 **API instables** : Filecoin-Pin en développement actif
+> - 📊 **Performance non-optimisée** : Latences variables, pas de SLA
+> - 🔐 **Sécurité limitée** : Testnet sans garanties cryptoéconomiques
+>
+> **Objectif R&D** : Valider faisabilité technique du partage décentralisé d'embeddings
+> avec signatures cryptographiques et intégrité via IPFS/Filecoin.
+>
+> La **Phase 6 - Mainnet** sera déclenchée uniquement si Filecoin-Pin devient
+> production-ready avec des garanties enterprise appropriées.
+
+### 🔒 5.1 Sécurité : R&D vs Production
+
+- **R&D (Filecoin-Pin Testnet)**
+  - Cryptographie locale 100% valide (Ed25519 + Blake3)
+  - Transport décentralisé expérimental
+  - Pas de SLA, pas de garantie de rétention
+  - Pas pour données sensibles
+
+- **Production (Phase 6)**
+  - Transport sur réseau privé/entreprises ou P2P direct
+  - Stockage chiffré côté client
+  - Jetons de permissions par sandbox (future micro-DAO)
+  - Contrôles d'accès et politiques de confiance configurables
+
+### 🎒 5.2 Ce qui est partagé / non partagé dans un Sandbox GCEL
+
+| Élément | Partagé | Commentaires |
+|---------|---------|-------------|
+| Embeddings | ✅ | Vecteurs 384D, jamais le document original |
+| Chunks textuels | 🟡 Optionnel | Le texte peut être chiffré ou supprimé |
+| Métadonnées OCR | 🟡 Optionnel | Peut être anonymisé avant export |
+| KPIs & Insights business | 🟡 Optionnel | Peut être redérivé localement depuis embeddings |
+| Documents originaux | ❌ Jamais | Non exportés, jamais stockés dans le bundle |
+| Identité utilisateur | 🟡 Pubkey Ed25519 | Pas de données personnelles |
+| Historique local RAG | ❌ Jamais | Reste sur la machine locale |
+
+Cette phase révolutionnaire transforme le RAG offline de GRAVIS en RAG coopératif, capable de partager un "bac à sable d'embeddings" (sandbox vectoriel) entre plusieurs utilisateurs, avec intégrité garantie via signatures cryptographiques et pinning décentralisé.
+
+GCEL respecte l'architecture GRAVIS : **offline-first**, souveraine et sans dépendance obligatoire à un réseau décentralisé.
+Le partage via Filecoin Pin est un **mode optionnel** réservé à la R&D.
+
+### 🎯 5.1 Objectif Phase 5
+- Permettre à un utilisateur GRAVIS d'exporter son sandbox d'embeddings local (chunks + métadonnées)
+- Permettre à un autre utilisateur de l'importer automatiquement avec vérification d'intégrité
+- Conserver une preuve cryptographique : signature, version, diff vectoriel
+- Utiliser Filecoin Pin (Calibration testnet) pour le transport décentralisé P2P
+
+### 🔧 5.2 Format "Sandbox Bundle" (local)
+
+Création d'un bundle portable représentant l'état complet du RAG d'un utilisateur.
+
+**Structure** :
+```
+sandbox.bundle/
+│── manifest.json        // metadonnées + signature + version
+│── embeddings.jsonl     // embeddings 384D + métadonnées  
+│── chunks.jsonl         // textes chunkés + OCR metadata
+│── documents.jsonl      // documents avec hash blake3
+│── spans.jsonl          // source spans + bbox (Phase 4)
+│── schema.json          // version du format + compatibility
+│── signature.ed25519    // signature cryptographique
+```
+
+**Nouveau composant** : `SandboxExporter` (Rust)
+```rust
+// src/gcel/sandbox_exporter.rs - NOUVEAU
+pub struct SandboxExporter {
+    base_rag: Arc<DocumentSyncManager>, // Réutilise RAG v2.0 ✅
+    crypto_signer: Ed25519Signer,       // Signatures
+    compression: CompressionLevel,       // zstd compression
+}
+
+impl SandboxExporter {
+    pub async fn export_sandbox(&self, group_id: &str) -> Result<SandboxBundle> {
+        // 1. Collecte chunks + embeddings + spans du RAG v2.0
+        // 2. Génération manifest avec blake3 hashes  
+        // 3. Signature Ed25519 de l'ensemble
+        // 4. Compression bundle pour transport
+    }
+    
+    pub fn hash_bundle(&self, bundle: &SandboxBundle) -> Blake3Hash {
+        // Hash cryptographique du bundle complet
+    }
+    
+    pub fn sign_bundle(&self, bundle_hash: &Blake3Hash) -> Ed25519Signature {
+        // Signature pour intégrité et authentification
+    }
+}
+```
+
+### 🌐 5.3 Pinning Décentralisé (Filecoin Pin – PoC)
+
+**Utilisation du projet** : https://github.com/filecoin-project/filecoin-pin
+
+**Objectif** : Mettre à disposition un bundle via :
+- IPFS CID pour addressing
+- Stockage pinning Filecoin (testnet Calibration)
+- Téléchargeable via HTTP gateway décentralisé
+
+```rust
+// Commandes Tauri pour pinning décentralisé
+#[tauri::command]
+pub async fn pin_sandbox_bundle(
+    bundle_path: String,
+    state: State<'_, RagState>
+) -> Result<PinResult, String> {
+    // 1. Export sandbox vers bundle local
+    let bundle = state.sandbox_exporter.export_sandbox("default_group").await?;
+    
+    // 2. Pin sur Filecoin via filecoin-pin CLI
+    let pin_result = Command::new("filecoin-pin")
+        .args(["add", &bundle_path])
+        .output().await?;
+    
+    // 3. Parse CID résultant
+    let cid = String::from_utf8(pin_result.stdout)?;
+    
+    Ok(PinResult {
+        cid: cid.trim().to_string(),
+        size_bytes: bundle.size(),
+        pinned_at: SystemTime::now(),
+        gateway_url: format!("https://ipfs.io/ipfs/{}", cid.trim()),
+    })
+}
+
+#[derive(Serialize)]
+pub struct PinResult {
+    pub cid: String,               // "bafkreia6..."
+    pub size_bytes: u64,
+    pub pinned_at: SystemTime,
+    pub gateway_url: String,       // URL publique
+}
+```
+
+### 🔄 5.4 Import Coopératif (Pull d'un autre GRAVIS)
+
+**Nouveau composant** : `SandboxImporter`
+```rust
+// src/gcel/sandbox_importer.rs - NOUVEAU  
+pub struct SandboxImporter {
+    base_rag: Arc<DocumentSyncManager>, // Integration RAG v2.0
+    crypto_verifier: Ed25519Verifier,   // Vérification signatures
+    deduplicator: SimHashDeduplicator,  // Anti-duplicate (Phase 4)
+}
+
+impl SandboxImporter {
+    pub async fn pull_from_cid(&self, cid: &str) -> Result<SandboxBundle> {
+        // 1. Télécharge bundle depuis IPFS gateway
+        let bundle_data = self.download_from_ipfs(cid).await?;
+        // 2. Décompression + parsing
+        let bundle = SandboxBundle::from_bytes(bundle_data)?;
+        // 3. Vérification signature cryptographique
+        self.verify_bundle_integrity(&bundle)?;
+        Ok(bundle)
+    }
+    
+    pub async fn verify_signature(&self, bundle: &SandboxBundle) -> Result<bool> {
+        // Vérification Ed25519 + blake3 hash integrity
+        let computed_hash = self.hash_bundle(bundle);
+        self.crypto_verifier.verify(&bundle.signature, &computed_hash)
+    }
+    
+    pub async fn compare_with_local(&self, remote_bundle: &SandboxBundle) -> Result<SandboxDiff> {
+        // Génère diff vectoriel intelligent avec dedup
+        let local_chunks = self.base_rag.get_all_chunks().await?;
+        let diff = SandboxDiff::compute(&local_chunks, &remote_bundle.chunks);
+        Ok(diff)
+    }
+    
+    pub async fn merge_sandbox(&self, 
+        remote_bundle: &SandboxBundle, 
+        merge_policy: MergePolicy
+    ) -> Result<MergeResult> {
+        match merge_policy {
+            MergePolicy::Union => self.merge_union(remote_bundle).await,
+            MergePolicy::ReplaceConflicts => self.merge_replace(remote_bundle).await,
+            MergePolicy::SkipDuplicates => self.merge_skip_dups(remote_bundle).await,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct SandboxDiff {
+    pub new_chunks: usize,        // Chunks absents localement
+    pub duplicate_chunks: usize,   // Chunks déjà présents  
+    pub conflicting_chunks: usize, // Même ID, contenu différent
+    pub new_documents: usize,      // Documents complètement nouveaux
+    pub embedding_compatibility: bool, // Schemas compatibles ?
+}
+```
+
+### 🔐 5.5 Garanties Cryptographiques (obligatoires)
+
+**manifest.json enrichi** :
+```json
+{
+  "version": "1.0.0",
+  "bundle_format": "gcel_sandbox_v1",
+  "group_id": "default_group",
+  "created_at": 1731501320,
+  "created_by": "ed25519:public_key_hex",
+  "blake3_root": "9f23abce12345...",
+  "embedding_schema": {
+    "model": "CustomE5",
+    "version": "1.2.0", 
+    "dimensions": 384,
+    "normalized": true
+  },
+  "files": [
+    { "path": "embeddings.jsonl", "blake3": "a1b2c3...", "size_bytes": 1024000 },
+    { "path": "chunks.jsonl", "blake3": "d4e5f6...", "size_bytes": 512000 },
+    { "path": "spans.jsonl", "blake3": "g7h8i9...", "size_bytes": 256000 }
+  ],
+  "statistics": {
+    "total_chunks": 1000,
+    "total_documents": 25,
+    "avg_confidence": 0.85,
+    "languages": ["fr", "en"]
+  },
+  "signature": "ed25519:signature_hex"
+}
+```
+
+**Propriétés garanties** :
+- ✅ **Immutable** : Bundle signé cryptographiquement
+- ✅ **Traceable** : Identité du créateur via Ed25519 
+- ✅ **Verifiable** : Intégrité via Blake3 + signature
+- ✅ **Versionned** : Schema evolution compatible
+- ✅ **Deduplicated** : SimHash pour éviter pollution
+
+### 🧩 5.6 Intégration Interface GRAVIS
+
+**Nouvelle zone UI** : "Explorer les Sandbox GRAVIS"
+
+**Composants React** :
+```tsx
+// src/components/SandboxExplorer.tsx - NOUVEAU
+const SandboxExplorer = () => {
+  const [sharedSandboxes, setSharedSandboxes] = useState<SharedSandbox[]>([]);
+  const [selectedSandbox, setSelectedSandbox] = useState<SandboxBundle | null>(null);
+  const [diff, setDiff] = useState<SandboxDiff | null>(null);
+  
+  // Liste des CIDs partagés publiquement
+  const loadSharedSandboxes = async () => {
+    // Query registry des sandboxes publics
+    const sandboxes = await invoke<SharedSandbox[]>('list_shared_sandboxes');
+    setSharedSandboxes(sandboxes);
+  };
+  
+  // Prévisualisation d'un sandbox distant
+  const previewSandbox = async (cid: string) => {
+    const bundle = await invoke<SandboxBundle>('pull_sandbox_preview', { cid });
+    const localDiff = await invoke<SandboxDiff>('compare_with_local', { bundle });
+    setSelectedSandbox(bundle);
+    setDiff(localDiff);
+  };
+  
+  // Import + fusion
+  const importAndMerge = async (cid: string, policy: MergePolicy) => {
+    const result = await invoke<MergeResult>('import_sandbox_bundle', { 
+      cid, 
+      mergePolicy: policy 
+    });
+    showNotification(`${result.chunks_added} chunks ajoutés, ${result.duplicates_skipped} doublons ignorés`);
+  };
+  
+  return (
+    <div className="sandbox-explorer">
+      <h3>🌐 Explorer les Sandbox GRAVIS</h3>
+      
+      {/* Liste des sandboxes publics */}
+      <div className="shared-sandboxes-grid">
+        {sharedSandboxes.map(sandbox => (
+          <SandboxCard 
+            key={sandbox.cid}
+            sandbox={sandbox}
+            onPreview={() => previewSandbox(sandbox.cid)}
+            onImport={(policy) => importAndMerge(sandbox.cid, policy)}
+          />
+        ))}
+      </div>
+      
+      {/* Diff visualizer */}
+      {diff && (
+        <SandboxDiffViewer 
+          diff={diff}
+          onMergeConfirm={(policy) => importAndMerge(selectedSandbox!.cid, policy)}
+        />
+      )}
+    </div>
+  );
+};
+
+// Composant pour visualiser les différences
+const SandboxDiffViewer = ({ diff, onMergeConfirm }) => (
+  <div className="diff-viewer">
+    <h4>📊 Analyse du Sandbox Distant</h4>
+    <div className="diff-stats">
+      <span className="new-chunks">+{diff.new_chunks} nouveaux chunks</span>
+      <span className="duplicates">~{diff.duplicate_chunks} doublons</span>
+      <span className="conflicts">⚠️ {diff.conflicting_chunks} conflits</span>
+    </div>
+    
+    <div className="merge-options">
+      <button onClick={() => onMergeConfirm('Union')}>
+        Fusionner (Union)
+      </button>
+      <button onClick={() => onMergeConfirm('SkipDuplicates')}>
+        Importer (Skip Dups)
+      </button>
+    </div>
+  </div>
+);
+```
+
+**Commandes Tauri associées** :
+```rust
+#[tauri::command]
+pub async fn list_shared_sandboxes() -> Result<Vec<SharedSandbox>, String> {
+    // Query registry public des sandboxes
+}
+
+#[tauri::command] 
+pub async fn pull_sandbox_preview(cid: String) -> Result<SandboxBundle, String> {
+    // Download + parse sans merger
+}
+
+#[tauri::command]
+pub async fn compare_with_local(bundle: SandboxBundle) -> Result<SandboxDiff, String> {
+    // Génère diff détaillé
+}
+
+#[tauri::command]
+pub async fn import_sandbox_bundle(
+    cid: String, 
+    merge_policy: MergePolicy
+) -> Result<MergeResult, String> {
+    // Import complet avec merge
+}
+```
+
+### 📈 5.7 Livrables Phase 5
+
+**Composants Rust** :
+- ✅ **SandboxExporter** : Export bundles avec compression + signature
+- ✅ **SandboxImporter** : Import + vérification + merge intelligent  
+- ✅ **Ed25519 Crypto Layer** : Signatures + vérification intégrité
+- ✅ **Filecoin Pin Integration (PoC)** : Commands wrapper pour pinning testnet uniquement
+
+**Fonctionnalités** :
+- ✅ **Bundle Format** : Structure standardisée avec manifest cryptographique
+- ✅ **Diff Vectoriel** : Comparaison intelligente avec deduplication
+- ✅ **Merge Policies** : Union, Replace, SkipDuplicates avec conflict resolution
+- ✅ **IPFS Gateway (PoC)** : Download/upload via CIDs décentralisés (testnet Calibration uniquement)
+
+**Interface Utilisateur** :
+- ✅ **Sandbox Explorer** : UI pour browse + preview sandboxes distants
+- ✅ **Diff Viewer** : Visualisation des différences avant merge
+- ✅ **Import Wizard** : Assistant guidé pour import + fusion
+- ✅ **Export Panel** : Interface pour créer + partager sandboxes
+
+**Commandes Tauri** :
+- ✅ `pin_sandbox_bundle()` : Export + pin sur Filecoin (PoC testnet)
+- ✅ `list_shared_sandboxes()` : Registry des sandboxes publics (PoC R&D)  
+- ✅ `import_sandbox_bundle()` : Import complet avec verification
+- ✅ `compare_sandboxes()` : Diff analysis pour decision merge
+
+**Documentation** :
+- ✅ **Guide utilisateur** : Comment partager/importer sandboxes
+- ✅ **Documentation technique** : Format bundle + crypto guarantees
+- ✅ **Troubleshooting** : Résolution conflicts + compatibility issues
+
+---
+
+## 🌌 **Phase 6: Passage Mainnet + Réseau P2P (optionnel/futur)**
+
+> ⚠️ **PHASE CONDITIONNELLE** - Dépendante de la maturité mainnet Filecoin-Pin
+
+**Durée** : À déclencher uniquement quand Filecoin-Pin sera disponible en mainnet avec garanties production  
+**Objectif** : Production-grade decentralized sandbox sharing
+
+**Conditions de déclenchement** :
+- 📈 **Filecoin-Pin mainnet disponible** avec SLA enterprise
+- 🔐 **Garanties cryptoéconomiques** suffisantes pour données sensibles  
+- 💰 **Coûts storage** économiquement viables pour utilisateurs
+- 🚀 **Performance** compatible avec UX temps-réel (latence <2s)
+
+### 6.1 Migration Mainnet
+- ✅ Migration endpoints testnet → mainnet Filecoin
+- ✅ Activation réplication longue durée (storage deals)
+- ✅ Registry permanent des sandboxes avec search/discovery
+
+### 6.2 Réseau P2P Direct  
+- ✅ Mode P2P direct (GRAVIS ↔ GRAVIS) sans IPFS gateway
+- ✅ WebRTC connection pour partage temps réel
+- ✅ Sync automatique entre collaborateurs sandbox
+
+### 6.3 Governance Décentralisée
+- ✅ Reputation system pour sandboxes de qualité
+- ✅ Modération communautaire avec voting
+- ✅ Marketplace optionnel pour sandboxes premium
+
+---
+
+## 🎯 Résumé de l'Evolution Complète
+
+| Phase | Focus | Durée | Output |
+|-------|--------|-------|--------|
+| **Phase 1-3** ✅ | OCR + RAG local | 6 mois | Production local RAG |
+| **Phase 4** 🔄 | RAG Industriel v2.0 | 3-4 semaines | Spans + Versioning + Dedup |
+| **Phase 5** 🚀 | GCEL Coopératif | 5-7 jours | Sandbox sharing P2P |  
+| **Phase 6** 🌌 | Mainnet + P2P | Variable | Network effect |
+
+**Transformation** : GRAVIS passe d'un **RAG offline** à une **plateforme coopérative décentralisée** pour le partage d'embeddings avec garanties cryptographiques ! 
+
+L'intégration Filecoin Pin + GCEL transforme GRAVIS en véritable "**Git pour les connaissances vectorisées**" 🚀
+
+### 4.1 Pipeline Asynchrone Complet LEGACY
 ```rust
 // Processing background avec tokio
 impl IngestionEngine {

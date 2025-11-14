@@ -19,6 +19,8 @@ pub mod text;
 pub mod ocr;
 // Tauri commands
 pub mod commands;
+// Phase 2: Chat Direct commands
+pub mod direct_chat_commands;
 
 // Phase 4 exports - Production ready
 pub use search::{CustomE5Config, CustomE5Embedder};
@@ -41,14 +43,23 @@ pub use core::{
     EmbedderManager, get_embedder, get_embedder_with_config,
     IngestionEngine, StrategyDetector, IngestionStrategy, IngestionResult,
     BatchIngestionResult, CacheStats,
-    UnifiedCache, CachedDocument, CacheCleanupResult, CacheMetrics
+    UnifiedCache, CachedDocument, CacheCleanupResult, CacheMetrics,
+    // Phase 4A: Source Spans & Explainability
+    SourceSpan, SourceSpanManager, CoordinateSystem, 
+    ExtractionMetadata, ExplainabilityReport, SourceSpanError, SpanStats
 };
+
+// Alias pour éviter conflits avec BoundingBox de direct_chat
+pub use crate::rag::core::source_spans::BoundingBox as SourceBoundingBox;
 
 // Processing exports
 pub use processing::{
     DocumentProcessor, DocumentClassifier, DocumentCategory, BusinessSignals,
     SmartChunker, SmartChunkConfig, SmartChunkResult, ChunkSection,
-    BusinessMetadata, BusinessSection, FinancialKPI, BusinessMetadataEnricher
+    BusinessMetadata, BusinessSection, FinancialKPI, BusinessMetadataEnricher,
+    // Phase 4A: Span-Aware Chunking
+    SpanAwareChunker, SpanAwareChunkConfig, SpanAwareChunkResult, 
+    ChunkingStats, SpanChunkError
 };
 
 // Search exports
@@ -66,6 +77,11 @@ pub use text::{
 pub use commands::{
     RagState, DocumentIngestionResponse, SearchResponseWithMetadata, SearchResultWithMetadata,
     AdvancedSearchParams, DocumentMetadataResponse, CacheStats as CommandsCacheStats
+};
+
+// Phase 2: Chat Direct exports
+pub use direct_chat_commands::{
+    DirectChatState, ProcessDocumentResponse, ChatRequest, ChatResponse, SourceSummary
 };
 
 // === Core Data Structures (Phase 1) ===
@@ -188,6 +204,8 @@ pub struct EnrichedChunk {
     pub hash: String, // blake3 pour cache embeddings
     pub metadata: ChunkMetadata,
     pub group_id: String,
+    // Phase 4A: Source Spans & Explainability
+    pub source_spans: Option<Vec<String>>, // Références aux span IDs
 }
 
 /// Type de chunk
@@ -210,7 +228,7 @@ pub enum SourceType {
 }
 
 /// Méthode d'extraction utilisée - Phase 1 OCR
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ExtractionMethod {
     DirectRead,                                    // Lecture directe fichier
     TesseractOcr { confidence: f32, language: String }, // OCR Tesseract
@@ -363,6 +381,7 @@ mod tests {
                 extraction_method: ExtractionMethod::DirectRead,
             },
             group_id: "group1".to_string(),
+            source_spans: None,
         };
         
         chunk.generate_hash();

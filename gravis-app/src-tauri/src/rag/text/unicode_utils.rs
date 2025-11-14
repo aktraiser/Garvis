@@ -272,7 +272,7 @@ mod tests {
         
         assert_eq!(result, "The first floor office has ff and ffi ligatures");
         assert_eq!(stats.ligatures_replaced, 5);
-        assert!(stats.total_chars > 0);
+        assert!(stats.total_chars_before > 0);
     }
 
     #[test]

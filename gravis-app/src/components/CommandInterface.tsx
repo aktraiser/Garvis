@@ -6,6 +6,8 @@ import { listen } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { RagWindow } from './RagWindow';
 import { ModelSelectorWindow } from './ModelSelectorWindow';
+import { FileBadge, OCRPanel } from './direct-chat';
+import { useDirectChat } from '@/hooks/useDirectChat';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -131,6 +133,9 @@ export function CommandInterface() {
   const [ragCollection] = useState('default_group'); // TODO: Add UI to select collection
   const [expandedSource, setExpandedSource] = useState<{messageId: string, sourceIdx: number} | null>(null);
   const { queryRagWithContext } = useRagQuery();
+
+  // Direct Chat - Using custom hook
+  const directChat = useDirectChat();
   
   const openRagWindow = async () => {
     try {
@@ -502,14 +507,17 @@ Question à propos de ce contenu : `;
     const resizeWindow = async () => {
       try {
         const window = getCurrentWindow();
+        const fileBadgeHeight = directChat.droppedFile ? 40 : 0; // Add height for file badge if present
+
         if (conversationHistory.length > 0 || isProcessing) {
-          // Expand to 400px when there's content
-          await window.setSize(new LogicalSize(500, 400));
+          // Expand to 400px when there's content + file badge height
+          const totalHeight = 400 + fileBadgeHeight;
+          await window.setSize(new LogicalSize(500, totalHeight));
         } else {
-          // Calculate height based on textarea size
+          // Calculate height based on textarea size + file badge height
           const baseHeight = 150; // Base window height
           const extraHeight = Math.max(0, textareaHeight - 20); // Extra height for textarea expansion
-          const newHeight = baseHeight + extraHeight;
+          const newHeight = baseHeight + extraHeight + fileBadgeHeight;
           await window.setSize(new LogicalSize(500, newHeight));
         }
       } catch (error) {
@@ -518,7 +526,7 @@ Question à propos de ce contenu : `;
     };
 
     resizeWindow();
-  }, [conversationHistory.length, isProcessing, textareaHeight]);
+  }, [conversationHistory.length, isProcessing, textareaHeight, directChat.droppedFile]);
 
   // Helper function to add assistant response to conversation history
   const addAssistantResponse = (content: string, thinkingContent?: string, metrics?: any, ragSources?: RagContextResponse) => {
@@ -546,18 +554,73 @@ Question à propos de ce contenu : `;
     // Terminer la conversation actuelle avant d'en démarrer une nouvelle
     conversationManager.endCurrentConversation();
     console.log('🔄 Nouvelle conversation démarrée');
-    
+
     setConversationHistory([]);
     setResponse("");
     setThinking("");
     setShowThinking(false);
     setIsThinking(false);
     setQuery("");
+
+    // Reset direct chat states
+    directChat.resetDirectChat();
+  };
+
+  // Handle direct chat with dropped document - Wrapper autour du hook
+  const handleDirectChat = async (userQuery: string) => {
+    // Add user message
+    const userMessage = {
+      id: Date.now().toString(),
+      type: 'user' as const,
+      content: userQuery,
+      timestamp: new Date(),
+    };
+    setConversationHistory(prev => [...prev, userMessage]);
+    setQuery("");
+
+    // Reset textarea height
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = '20px';
+      setTextareaHeight(20);
+    }
+
+    setIsProcessing(true);
+    setResponse("");
+
+    // Use the directChat hook
+    const result = await directChat.chatWithDocument(userQuery);
+
+    if (result.success) {
+      const assistantMessage = {
+        id: (Date.now() + 1).toString(),
+        type: 'assistant' as const,
+        content: result.content,
+        timestamp: new Date(),
+      };
+      setConversationHistory(prev => [...prev, assistantMessage]);
+    } else {
+      const errorMessage = {
+        id: (Date.now() + 1).toString(),
+        type: 'assistant' as const,
+        content: result.content,
+        timestamp: new Date(),
+      };
+      setConversationHistory(prev => [...prev, errorMessage]);
+    }
+
+    setIsProcessing(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim() || isProcessing) return;
+
+    // If direct chat session exists, use direct chat command
+    if (directChat.hasActiveSession) {
+      await handleDirectChat(query.trim());
+      return;
+    }
 
     // Vérifier qu'un modèle valide est sélectionné
     if (!currentModel || !currentModel.id || currentModel.id === '') {
@@ -863,9 +926,12 @@ Question à propos de ce contenu : `;
 
   // Éviter l'erreur TypeScript - utiliser response
   if (response.length > 10000) console.log('Long response detected');
-  
+
   return (
-    <div className="search-popup">
+    <div
+      className="search-popup"
+      {...directChat.dragHandlers}
+    >
       {/* Drag area on top */}
       <div className="top-bar" data-tauri-drag-region>
       </div>
@@ -874,7 +940,15 @@ Question à propos de ce contenu : `;
       <div className="search-container">
         <div className="drag-handle" data-tauri-drag-region></div>
         <form onSubmit={handleSubmit}>
-          <div className="search-input-wrapper">
+          <div
+            className="search-input-wrapper"
+            style={{
+              ...(directChat.isDragging && {
+                border: '2px dashed #3b82f6',
+                boxShadow: '0 0 0 3px rgba(59, 130, 246, 0.2)',
+              })
+            }}
+          >
             <textarea
               ref={textareaRef}
               value={query}
@@ -919,7 +993,15 @@ Question à propos de ce contenu : `;
             )}
           </div>
         </form>
-        
+
+        {/* Dropped File Badge */}
+        {directChat.droppedFile && (
+          <FileBadge
+            fileName={directChat.droppedFile.name}
+            onRemove={directChat.removeDroppedFile}
+          />
+        )}
+
         {/* AWCS Global Shortcut Tip */}
         <div className="shortcut-tip" style={{
           fontSize: '11px',
@@ -1364,11 +1446,26 @@ Question à propos de ce contenu : `;
 
       {/* RAG Window - Full screen overlay */}
       {showRagWindow && (
-        <RagWindow 
+        <RagWindow
           onClose={() => setShowRagWindow(false)}
         />
       )}
-      
+
+      {/* OCR Viewer Panel - Split panel for direct chat */}
+      {directChat.showOCRViewer && directChat.ocrContent && directChat.directChatSession && (
+        <OCRPanel
+          documentName={directChat.directChatSession.document_name}
+          ocrContent={directChat.ocrContent}
+          highlightedSpans={directChat.highlightedSpans}
+          onSpanClick={(span) => {
+            console.log('Span clicked:', span);
+          }}
+          onTextSelection={(text) => {
+            console.log('Text selected:', text);
+          }}
+        />
+      )}
+
     </div>
   );
 }

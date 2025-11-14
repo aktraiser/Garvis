@@ -20,6 +20,7 @@ use crate::rag::search::custom_e5::CustomE5Embedder;
 use std::sync::Arc;
 
 /// Processeur de documents unifié avec intelligence OCR
+#[derive(Clone)]
 pub struct DocumentProcessor {
     ocr_processor: TesseractProcessor,
     #[allow(dead_code)]
@@ -116,6 +117,7 @@ impl DocumentProcessor {
                     extraction_method: extraction_method.clone(),
                 },
                 group_id: group_id.to_string(),
+                source_spans: None,
             };
             
             chunks.push(fallback_chunk);
@@ -186,6 +188,7 @@ impl DocumentProcessor {
                     extraction_method: ExtractionMethod::DirectRead,
                 },
                 group_id: group_id.to_string(),
+                source_spans: None,
             };
             chunks.push(emergency_chunk);
         }
@@ -655,6 +658,7 @@ impl DocumentProcessor {
                 extraction_method: extraction_method.clone(),
             },
             group_id: group_id.to_string(),
+            source_spans: None,
         };
 
         chunk.generate_hash();
@@ -689,6 +693,7 @@ impl DocumentProcessor {
                 extraction_method: extraction_method.clone(),
             },
             group_id: group_id.to_string(),
+            source_spans: None,
         };
 
         chunk.generate_hash();
@@ -754,6 +759,7 @@ fn simple_text_split(content: &str, chunk_config: &ChunkConfig) -> Vec<EnrichedC
                     extraction_method: ExtractionMethod::DirectRead,
                 },
                 group_id: "split".to_string(),
+                source_spans: None,
             };
             chunks.push(chunk);
             
@@ -800,6 +806,7 @@ fn simple_text_split(content: &str, chunk_config: &ChunkConfig) -> Vec<EnrichedC
                 extraction_method: ExtractionMethod::DirectRead,
             },
             group_id: "split".to_string(),
+            source_spans: None,
         };
         chunks.push(chunk);
     }
@@ -895,6 +902,7 @@ fn create_fallback_chunk(content: &str, index: usize) -> EnrichedChunk {
             extraction_method: ExtractionMethod::DirectRead,
         },
         group_id: "fallback".to_string(),
+        source_spans: None,
     }
 }
 
@@ -911,7 +919,7 @@ mod tests {
 
         let ocr_config = OcrConfig::default();
         let tesseract_config = TesseractConfig::default();
-        let ocr_processor = TesseractProcessor::new(ocr_config, tesseract_config).unwrap();
+        let ocr_processor = TesseractProcessor::new(tesseract_config).await.unwrap();
         
         // TODO: Mock embedder pour tests
         // let embedder = CustomE5Embedder::new(CustomE5Config::default()).await.unwrap();

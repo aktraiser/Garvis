@@ -75,6 +75,7 @@ fn create_file_menu(app: &AppHandle) -> Result<Submenu<tauri::Wry>, Box<dyn std:
     let open_document = MenuItem::with_id(app, "open_document", "Ouvrir document...", true, None::<&str>)?;
     file_menu.append(&open_document)?;
 
+
     file_menu.append(&PredefinedMenuItem::separator(app)?)?;
 
     // Fermer fenêtre

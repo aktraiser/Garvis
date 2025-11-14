@@ -1701,3 +1701,22 @@ body {
 .thinking-content.live pre {
   color: #e5e7eb;
 }
+
+/* Animations pour le drag & drop et chat direct */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}

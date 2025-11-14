@@ -507,10 +507,11 @@ mod tests {
     #[test]
     fn test_intent_boost() {
         let base_score = 0.5;
-        let boosted = apply_intent_boost(
+        let boosted = apply_intelligent_boost(
             base_score,
             &QueryIntent::Business,
-            &DocumentCategory::Business
+            &DocumentCategory::Business,
+            "test document text"
         );
         
         assert!(boosted > base_score);

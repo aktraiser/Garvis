@@ -1,5 +1,5 @@
 // Window management commands for GRAVIS
-use tauri::{AppHandle, WebviewUrl, WebviewWindowBuilder, Manager, Emitter};
+use tauri::{AppHandle, WebviewUrl, WebviewWindowBuilder, Manager, Emitter, PhysicalPosition, PhysicalSize};
 
 #[tauri::command]
 pub async fn open_rag_storage_window(app: AppHandle) -> Result<(), String> {
@@ -231,7 +231,7 @@ pub async fn get_active_windows(app: AppHandle) -> Result<Vec<String>, String> {
 #[tauri::command]
 pub async fn close_specific_window(app: AppHandle, window_label: String) -> Result<(), String> {
     tracing::info!("Attempting to close window: {}", window_label);
-    
+
     if let Some(window) = app.get_webview_window(&window_label) {
         window.close().map_err(|e| format!("Failed to close window '{}': {}", window_label, e))?;
         tracing::info!("Successfully closed window: {}", window_label);
@@ -240,5 +240,142 @@ pub async fn close_specific_window(app: AppHandle, window_label: String) -> Resu
         let error_msg = format!("Window '{}' not found", window_label);
         tracing::warn!("{}", error_msg);
         Err(error_msg)
+    }
+}
+
+#[tauri::command]
+pub async fn open_ocr_viewer_window(
+    app: AppHandle,
+    session_id: String,
+) -> Result<(), String> {
+    tracing::info!("Creating OCR Viewer window for session: {}", session_id);
+
+    // Close existing OCR viewer if any
+    if let Some(existing) = app.get_webview_window("ocr_viewer") {
+        tracing::info!("Closing existing OCR viewer window");
+        let _ = existing.close();
+    }
+
+    // Get main window position and size to position OCR viewer next to it
+    let main_window = app.get_webview_window("main")
+        .ok_or_else(|| "Main window not found".to_string())?;
+
+    let main_outer_position = main_window.outer_position()
+        .map_err(|e| format!("Failed to get main window position: {}", e))?;
+    let main_outer_size = main_window.outer_size()
+        .map_err(|e| format!("Failed to get main window size: {}", e))?;
+    let main_inner_size = main_window.inner_size()
+        .map_err(|e| format!("Failed to get main window inner size: {}", e))?;
+
+    // Calculate OCR viewer position (right next to main window, aligned at top)
+    // Position X: right after main window
+    let ocr_x = main_outer_position.x + main_outer_size.width as i32;
+    // Position Y: same as main window (aligned at top)
+    let ocr_y = main_outer_position.y;
+
+    // OCR viewer dimensions (same total height as main window)
+    let ocr_width = 600; // Width for OCR content
+    // Use outer height to match main window's total height including decorations
+    let ocr_height = main_outer_size.height;
+
+    match WebviewWindowBuilder::new(
+        &app,
+        "ocr_viewer",
+        WebviewUrl::App(format!("index.html#ocr-viewer?session={}", session_id).into()),
+    )
+    .title("OCR Document Viewer")
+    .inner_size(ocr_width as f64, ocr_height as f64)
+    .position(ocr_x as f64, ocr_y as f64)
+    .resizable(true)
+    .decorations(true)
+    .always_on_top(false)
+    .build() {
+        Ok(ocr_window) => {
+            tracing::info!("OCR Viewer window created successfully at position ({}, {})", ocr_x, ocr_y);
+
+            // Setup bidirectional window move synchronization
+            let ocr_window_clone = ocr_window.clone();
+            let main_window_clone = main_window.clone();
+            let ocr_window_clone2 = ocr_window.clone();
+            let main_window_clone2 = main_window.clone();
+
+            // Listen for main window move and resize events to sync OCR viewer
+            let _ = main_window.on_window_event(move |event| {
+                match event {
+                    tauri::WindowEvent::Moved(position) => {
+                        // Sync position when main window moves
+                        if let Ok(main_size) = main_window_clone.outer_size() {
+                            let new_ocr_x = position.x + main_size.width as i32;
+                            let new_ocr_y = position.y;
+                            let _ = ocr_window_clone.set_position(tauri::PhysicalPosition::new(new_ocr_x, new_ocr_y));
+                        }
+                    }
+                    tauri::WindowEvent::Resized(size) => {
+                        // Sync height when main window resizes
+                        if let Ok(main_position) = main_window_clone.outer_position() {
+                            if let Ok(current_size) = main_window_clone.outer_size() {
+                                // Update OCR viewer height to match main window
+                                let _ = ocr_window_clone.set_size(tauri::PhysicalSize::new(600, current_size.height));
+                                // Also update position to stay aligned
+                                let new_ocr_x = main_position.x + current_size.width as i32;
+                                let _ = ocr_window_clone.set_position(tauri::PhysicalPosition::new(new_ocr_x, main_position.y));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            });
+
+            // Listen for OCR window move events and sync main window
+            let _ = ocr_window.on_window_event(move |event| {
+                if let tauri::WindowEvent::Moved(position) = event {
+                    if let Ok(main_size) = main_window_clone2.outer_size() {
+                        let new_main_x = position.x - main_size.width as i32;
+                        let new_main_y = position.y;
+                        let _ = main_window_clone2.set_position(tauri::PhysicalPosition::new(new_main_x, new_main_y));
+                    }
+                }
+            });
+
+            // Focus main window to keep it active
+            let _ = main_window.set_focus();
+            Ok(())
+        },
+        Err(e) => {
+            tracing::error!("Failed to create OCR Viewer window: {}", e);
+            Err(format!("Failed to create OCR Viewer window: {}", e))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn close_ocr_viewer_window(app: AppHandle) -> Result<(), String> {
+    tracing::info!("Closing OCR Viewer window");
+
+    if let Some(window) = app.get_webview_window("ocr_viewer") {
+        window.close().map_err(|e| format!("Failed to close OCR viewer: {}", e))?;
+        tracing::info!("OCR Viewer window closed successfully");
+        Ok(())
+    } else {
+        tracing::warn!("OCR Viewer window not found");
+        Err("OCR Viewer window not found".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn update_ocr_viewer_highlights(
+    app: AppHandle,
+    spans: serde_json::Value,
+) -> Result<(), String> {
+    tracing::info!("Updating OCR viewer with highlighted spans");
+
+    if let Some(window) = app.get_webview_window("ocr_viewer") {
+        window.emit("update_highlights", spans)
+            .map_err(|e| format!("Failed to emit highlights to OCR viewer: {}", e))?;
+        tracing::debug!("Highlights updated successfully");
+        Ok(())
+    } else {
+        tracing::warn!("OCR Viewer window not found for highlight update");
+        Err("OCR Viewer window not found".to_string())
     }
 }
