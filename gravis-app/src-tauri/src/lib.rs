@@ -26,8 +26,9 @@ use rag::commands::{
     add_document_intelligent, search_with_metadata, get_document_metadata, list_rag_documents, delete_rag_document, query_rag_with_context
 };
 use rag::direct_chat_commands::{
-    process_dropped_document, chat_with_dropped_document, get_direct_chat_session, 
-    cleanup_direct_chat_session, get_direct_chat_stats, list_direct_chat_sessions, cleanup_expired_sessions
+    process_dropped_document, chat_with_dropped_document, get_direct_chat_session,
+    cleanup_direct_chat_session, get_direct_chat_stats, list_direct_chat_sessions, cleanup_expired_sessions,
+    get_temp_pdf_url, get_pdf_for_session
 };
 use awcs::AWCSState;
 use awcs::commands::{
@@ -725,7 +726,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             cleanup_direct_chat_session,
             get_direct_chat_stats,
             list_direct_chat_sessions,
-            cleanup_expired_sessions
+            cleanup_expired_sessions,
+            get_temp_pdf_url,
+            get_pdf_for_session
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

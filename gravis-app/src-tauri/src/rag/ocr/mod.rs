@@ -10,6 +10,8 @@ pub mod preprocessor;
 pub mod cache;
 pub mod commands;
 pub mod text_normalizer;
+pub mod types;
+pub mod layout_analyzer;
 
 // === Alternatives PDF (pures Rust et sans dépendances externes) ===
 pub mod pdf_lopdf;          // Alternative #1: lopdf (Pure Rust, recommandé)
@@ -21,6 +23,8 @@ pub use tesseract::{TesseractProcessor, TesseractConfig};
 pub use cache::{OcrCache, CacheConfig};
 pub use commands::{OcrCommands, OcrState};
 pub use text_normalizer::{normalize_for_rag, normalize_and_log, normalize_fast, needs_normalization, NormalizationStats};
+pub use layout_analyzer::{LayoutAnalyzer, LayoutAnalyzerConfig};
+pub use types::{BoundingBox, OCRBlock, BlockType, BoundingBoxExt};
 
 // === Exports des alternatives PDF ===
 pub use pdf_lopdf::{LopdFProcessor, LopdFPipelineConfig, LopdFPageResult};
@@ -134,11 +138,12 @@ pub struct OcrResult {
     pub text: String,
     pub confidence: f32,
     pub language: String,
-    pub bounding_boxes: Vec<BoundingBox>,
+    pub bounding_boxes: Vec<TesseractBoundingBox>,
     pub processing_time: Duration,
     pub engine_used: String,             // Toujours "Tesseract"
     pub tesseract_version: String,
     pub metadata: OcrMetadata,
+    pub ocr_blocks: Option<Vec<OCRBlock>>,  // Layout analysis blocks
 }
 
 /// Résultat OCR par page (pour PDF)
@@ -149,9 +154,9 @@ pub struct OcrPageResult {
     pub page_image_path: Option<String>,
 }
 
-/// Bounding box pour localisation du texte
+/// Tesseract-specific bounding box pour localisation du texte au niveau word/line
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BoundingBox {
+pub struct TesseractBoundingBox {
     pub x: u32,
     pub y: u32,
     pub width: u32,

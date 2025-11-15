@@ -197,6 +197,57 @@ impl DocumentProcessor {
         let document_id = format!("doc_{}", uuid::Uuid::new_v4().simple());
         let now = SystemTime::now();
 
+        // Extract OCR blocks if this is a PDF
+        let (ocr_blocks, page_dimensions) = if matches!(document_type, DocumentType::PDF { .. }) {
+            // Re-extract to get the image blocks
+            if let Ok(FileFormat::Pdf) = detect_file_format(file_path) {
+                if let Ok((_, _, blocks, dims)) = self.extract_pdf_native(file_path).await {
+                    (blocks, dims)
+                } else {
+                    (Vec::new(), std::collections::HashMap::new())
+                }
+            } else {
+                (Vec::new(), std::collections::HashMap::new())
+            }
+        } else {
+            (Vec::new(), std::collections::HashMap::new())
+        };
+
+        // 🆕 Sérialiser les OCR blocks en JSON pour metadata.custom_fields
+        let mut custom_fields = std::collections::HashMap::new();
+        if !ocr_blocks.is_empty() {
+            // Créer une structure sérialisable pour les blocs avec dimensions de page
+            let native_blocks: Vec<crate::rag::direct_chat_commands::NativeOCRBlock> = ocr_blocks.iter().map(|block| {
+                // Récupérer les dimensions de la page pour ce bloc
+                let (page_width, page_height) = page_dimensions.get(&block.page_number)
+                    .copied()
+                    .unwrap_or((595.0, 842.0)); // Fallback A4 si dimensions manquantes
+
+                crate::rag::direct_chat_commands::NativeOCRBlock {
+                    page_number: block.page_number,
+                    block_type: format!("{:?}", block.block_type), // "Text", "Header", "Table", etc.
+                    text: block.content.clone(),
+                    bbox: crate::rag::direct_chat_commands::NativeBBox {
+                        x: block.bounding_box.x,
+                        y: block.bounding_box.y,
+                        width: block.bounding_box.width,
+                        height: block.bounding_box.height,
+                    },
+                    confidence: block.confidence,
+                    page_width: Some(page_width),
+                    page_height: Some(page_height),
+                }
+            }).collect();
+
+            // Sérialiser en JSON
+            if let Ok(ocr_json) = serde_json::to_string(&native_blocks) {
+                custom_fields.insert("ocr_blocks".to_string(), ocr_json);
+                info!("✅ Stored {} OCR blocks in metadata.custom_fields", native_blocks.len());
+            } else {
+                warn!("⚠️ Failed to serialize OCR blocks to JSON");
+            }
+        }
+
         Ok(GroupDocument {
             id: document_id,
             file_path: file_path.to_path_buf(),
@@ -209,11 +260,12 @@ impl DocumentProcessor {
                 description: Some(format!("Processed via {:?}", extraction_method)),
                 author: None,
                 project: None,
-                custom_fields: std::collections::HashMap::new(),
+                custom_fields, // 🆕 Utiliser custom_fields avec OCR blocks
             },
             last_modified: now,
             document_type,
             group_id: group_id.to_string(),
+            ocr_blocks,
         })
     }
 
@@ -221,20 +273,34 @@ impl DocumentProcessor {
     async fn process_pdf(&self, path: &Path) -> RagResult<(String, DocumentType, ExtractionMethod)> {
         debug!("Processing PDF: {:?}", path);
 
-        // Tentative d'extraction native d'abord
+        // NOUVEAU: Stratégie hybride découplée affichage/embedding
         match self.extract_pdf_native(path).await {
-            Ok((content, native_ratio)) => {
-                if native_ratio > 0.8 {
-                    // Contenu natif de qualité, pas besoin d'OCR
+            Ok((content, native_ratio, _ocr_blocks, _page_dims)) => {
+                let text_quality_good = native_ratio > 0.8;
+                let substantial_text = content.len() > 1000;
+
+                if text_quality_good && substantial_text {
+                    // PDF avec texte extractible de qualité -> Retourner texte natif
+                    info!("High-quality extractable text detected (ratio={:.2}, {} chars). Using native extraction for display", 
+                          native_ratio, content.len());
                     let doc_type = DocumentType::PDF {
                         extraction_strategy: PdfStrategy::NativeOnly,
                         native_text_ratio: native_ratio,
                         ocr_pages: vec![],
-                        total_pages: 1, // TODO: détecter pages réelles
+                        total_pages: 1,
+                    };
+                    Ok((content, doc_type, ExtractionMethod::PdfNative))
+                } else if native_ratio > 0.6 {
+                    // Qualité correcte -> extraction native
+                    let doc_type = DocumentType::PDF {
+                        extraction_strategy: PdfStrategy::NativeOnly,
+                        native_text_ratio: native_ratio,
+                        ocr_pages: vec![],
+                        total_pages: 1,
                     };
                     Ok((content, doc_type, ExtractionMethod::PdfNative))
                 } else {
-                    // Qualité médiocre, basculer sur hybride
+                    // Qualité médiocre -> hybride
                     self.process_pdf_hybrid(path).await
                 }
             }
@@ -247,14 +313,14 @@ impl DocumentProcessor {
     }
 
     /// Extraction PDF native avec SimplePdfExtractor
-    async fn extract_pdf_native(&self, path: &Path) -> Result<(String, f32)> {
+    async fn extract_pdf_native(&self, path: &Path) -> Result<(String, f32, Vec<crate::rag::core::direct_chat::OCRBlock>, std::collections::HashMap<u32, (f64, f64)>)> {
         debug!("Attempting native PDF extraction for: {:?}", path);
-        
+
         let config = PdfExtractConfig::default();
         let extractor = SimplePdfExtractor::new(config);
         let result = extractor.extract_pdf_text(path).await
             .map_err(|e| anyhow::anyhow!("PDF extraction failed: {}", e))?;
-        
+
         // Si aucun texte extrait, retourner une erreur pour déclencher le fallback OCR
         if result.text.trim().is_empty() || result.token_count == 0 {
             warn!("PDF native extraction returned empty text, will trigger OCR fallback");
@@ -280,10 +346,14 @@ impl DocumentProcessor {
             0.3 // Texte court mais présent
         };
 
-        debug!("PDF native extraction: {} chars, quality={:.2}",
-               result.text.len(), quality_ratio);
+        // 🆕 Combiner image_blocks et layout_blocks
+        let mut all_ocr_blocks = result.image_blocks.clone();
+        all_ocr_blocks.extend(result.layout_blocks.clone());
 
-        Ok((result.text, quality_ratio))
+        debug!("PDF native extraction: {} chars, quality={:.2}, {} layout blocks, {} image blocks, {} total blocks",
+               result.text.len(), quality_ratio, result.layout_blocks.len(), result.image_blocks.len(), all_ocr_blocks.len());
+
+        Ok((result.text, quality_ratio, all_ocr_blocks, result.page_dimensions))
     }
 
     /// Traitement PDF hybride intelligent
@@ -292,46 +362,46 @@ impl DocumentProcessor {
         
         // 1. Tentative extraction native d'abord
         match self.extract_pdf_native(path).await {
-            Ok((content, quality)) if quality > 0.7 => {
+            Ok((content, quality, _ocr_blocks, _page_dims)) if quality > 0.7 => {
                 // Qualité suffisante, utiliser extraction native
                 info!("Using native PDF extraction (quality={:.2})", quality);
-                
+
                 // Sanitization Unicode pour ligatures PDF
                 let (sanitized_content, normalization_stats) = sanitize_pdf_text(&content)
                     .map_err(|e| RagError::InvalidConfig(format!("Unicode sanitization failed: {}", e)))?;
-                
+
                 if normalization_stats.ligatures_replaced > 0 {
                     info!("Sanitized PDF content: {} ligatures replaced", normalization_stats.ligatures_replaced);
                 }
-                
+
                 let doc_type = DocumentType::PDF {
                     extraction_strategy: PdfStrategy::NativeOnly,
                     native_text_ratio: quality,
                     ocr_pages: vec![],
                     total_pages: 1, // TODO: compter pages réelles
                 };
-                
+
                 Ok((sanitized_content, doc_type, ExtractionMethod::PdfNative))
             }
-            Ok((content, quality)) => {
+            Ok((content, quality, _ocr_blocks, _page_dims)) => {
                 // Qualité insuffisante, mais on a du contenu
                 info!("Native PDF quality moderate ({:.2}), using as fallback", quality);
-                
+
                 // Sanitization Unicode même pour qualité modérée
                 let (sanitized_content, normalization_stats) = sanitize_pdf_text(&content)
                     .map_err(|e| RagError::InvalidConfig(format!("Unicode sanitization failed: {}", e)))?;
-                
+
                 if normalization_stats.ligatures_replaced > 0 {
                     info!("Sanitized moderate quality PDF: {} ligatures replaced", normalization_stats.ligatures_replaced);
                 }
-                
+
                 let doc_type = DocumentType::PDF {
                     extraction_strategy: PdfStrategy::HybridIntelligent,
                     native_text_ratio: quality,
                     ocr_pages: vec![],
                     total_pages: 1,
                 };
-                
+
                 Ok((sanitized_content, doc_type, ExtractionMethod::HybridIntelligent))
             }
             Err(_) => {

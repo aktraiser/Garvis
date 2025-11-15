@@ -1,0 +1,45 @@
+DeepSeek-OCR: Contexts Optical Compression
+
+Abstract
+
+We present DeepSeek-OCR as an initial investigation into the feasibility of compressing long contexts via optical 2D mapping. DeepSeek-OCR consists of two components: DeepEncoder and DeepSeek3B-MoE-A570M as the decoder.
+
+600-700 700-800 800-900 900-1000 1000-1100 1100-1200 1200-1300
+Text Tokens in Per Page (Ground-truth)
+0%
+10%
+20%
+30%
+40%
+50%
+60%
+70%
+80%
+90%
+100%
+Precision (%) 96.5% 93.8% 83.8% 85.8% 79.3% 76.3% 59.1%
+98.5% 97.3% 96.8% 96.8% 91.5% 89.8% 87.1%
+
+Figure 1: Performance comparison on Fox benchmark showing compression ratios and accuracy
+
+Contents
+
+1 Introduction                           3
+2 Related Works                          4  
+2.1 Typical Vision Encoders in VLMs      4
+2.2 End-to-end OCR Models                4
+3 Methodology                            5
+3.1 Architecture                         5
+3.2 DeepEncoder                          5
+3.2.1 Architecture of DeepEncoder        5
+3.2.2 Multiple resolution support        6
+
+Vision Tokens    Edit Distance    Performance
+100              0.25             High Accuracy
+200              0.20             Medium  
+400              0.15             Very High
+800              0.12             Optimal
+
+Current Large Language Models (LLMs) face significant computational challenges when processing long textual content due to quadratic scaling with sequence length. We explore a potential solution: leveraging visual modality as an efficient compression medium for textual information.
+
+This insight motivates us to reexamine vision-language models (VLMs) from an LLM-centric perspective, focusing on how vision encoders can enhance LLMs' efficiency in processing textual information.

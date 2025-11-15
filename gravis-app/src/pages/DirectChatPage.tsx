@@ -3,16 +3,15 @@
 
 import React, { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { OCRViewerWithSpans, type SourceSpan, type OCRContent } from '@/components/OCRViewerWithSpans';
+import SimplePdfViewer from '@/components/SimplePdfViewer';
 import './DirectChatPage.css';
 
-// Types
+// Types simplifiés
 interface ProcessDocumentResponse {
   session: {
     session_id: string;
     document_name: string;
     chunks: any[];
-    ocr_content: OCRContent;
   };
   processing_time_ms: number;
   chunks_created: number;
@@ -22,7 +21,6 @@ interface ProcessDocumentResponse {
 
 interface ChatResponse {
   response: string;
-  contributing_spans: SourceSpan[];
   confidence_score: number;
   session_id: string;
   search_time_ms: number;
@@ -43,7 +41,6 @@ interface Message {
   type: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: Date;
-  contributing_spans?: SourceSpan[];
 }
 
 interface SelectionContext {
@@ -59,11 +56,9 @@ interface SelectionContext {
 export const DirectChatPage: React.FC = () => {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [documentName, setDocumentName] = useState<string>('');
-  const [ocrContent, setOcrContent] = useState<OCRContent | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [query, setQuery] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [highlightedSpans, setHighlightedSpans] = useState<SourceSpan[]>([]);
   const [selectionContext, setSelectionContext] = useState<SelectionContext | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -114,7 +109,6 @@ export const DirectChatPage: React.FC = () => {
       if (response.session) {
         setSessionId(response.session.session_id);
         setDocumentName(response.session.document_name);
-        setOcrContent(response.session.ocr_content);
 
         const welcomeMessage: Message = {
           id: Date.now().toString(),
@@ -166,8 +160,7 @@ export const DirectChatPage: React.FC = () => {
         }
       });
 
-      // Update highlighted spans with contributing spans
-      setHighlightedSpans(response.contributing_spans);
+      // Plus de highlighted spans - on utilise juste la réponse
 
       // Format response
       let responseContent = response.response;
@@ -187,7 +180,6 @@ export const DirectChatPage: React.FC = () => {
         type: 'assistant',
         content: responseContent,
         timestamp: new Date(),
-        contributing_spans: response.contributing_spans,
       };
 
       setMessages(prev => [...prev, assistantMessage]);
@@ -209,19 +201,54 @@ export const DirectChatPage: React.FC = () => {
     }
   };
 
-  // Handle span click in OCR viewer
-  const handleSpanClick = (span: SourceSpan) => {
-    console.log('Span clicked:', span);
-    // Could show span details or trigger a targeted question
-  };
+  // Handle text selection dans SimplePdfViewer
+  const handleTextAction = async (action: 'explain' | 'summarize', text: string) => {
+    try {
+      console.log(`🎯 ${action} requested for text:`, text);
+      
+      // Construire la question selon l'action
+      const question = action === 'explain' 
+        ? `Explique ce passage : "${text}"` 
+        : `Résume ce passage : "${text}"`;
+      
+      // Envoyer directement au système RAG
+      setQuery(question);
+      
+      // Auto-submit la question
+      const userMessage: Message = {
+        id: Date.now().toString(),
+        type: 'user',
+        content: question,
+        timestamp: new Date(),
+      };
 
-  // Handle text selection in OCR viewer
-  const handleTextSelection = (selectedText: string, bbox: any) => {
-    console.log('Text selected:', selectedText);
-    setSelectionContext({
-      text: selectedText,
-      bounding_rect: bbox || undefined,
-    });
+      setMessages(prev => [...prev, userMessage]);
+      setIsProcessing(true);
+
+      const response = await invoke<ChatResponse>('chat_with_dropped_document', {
+        request: {
+          session_id: sessionId,
+          query: question,
+          selection: { text },
+          limit: null,
+        }
+      });
+
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        type: 'assistant',
+        content: response.response,
+        timestamp: new Date(),
+      };
+
+      setMessages(prev => [...prev, assistantMessage]);
+      setQuery(''); // Clear input
+
+    } catch (error) {
+      console.error('Error in text action:', error);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -274,14 +301,6 @@ export const DirectChatPage: React.FC = () => {
                       <div key={idx}>{line || '\u00A0'}</div>
                     ))}
                   </div>
-                  {message.contributing_spans && message.contributing_spans.length > 0 && (
-                    <button
-                      className="message-show-spans"
-                      onClick={() => setHighlightedSpans(message.contributing_spans || [])}
-                    >
-                      🔍 Voir les {message.contributing_spans.length} spans
-                    </button>
-                  )}
                 </div>
               ))}
               {isProcessing && (
@@ -332,15 +351,24 @@ export const DirectChatPage: React.FC = () => {
             </form>
           </div>
 
-          {/* Right panel - OCR Viewer */}
-          {ocrContent && (
-            <OCRViewerWithSpans
-              documentName={documentName}
-              ocrContent={ocrContent}
-              highlightedSpans={highlightedSpans}
-              onSpanClick={handleSpanClick}
-              onTextSelection={handleTextSelection}
-            />
+          {/* Right panel - PDF Viewer */}
+          {sessionId && (
+            <div style={{
+              position: 'fixed',
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: '50%',
+              backgroundColor: '#1f2937',
+              borderLeft: '1px solid #374151',
+              zIndex: 999,
+              overflow: 'hidden',
+            }}>
+              <SimplePdfViewer
+                sessionId={sessionId}
+                onTextAction={handleTextAction}
+              />
+            </div>
           )}
         </div>
       )}

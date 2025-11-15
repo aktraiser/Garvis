@@ -272,6 +272,7 @@ pub async fn add_document_intelligent(
                 total_pages: 1,
             },
             group_id: group_id.clone(),
+            ocr_blocks: Vec::new(),  // No OCR blocks for pre-extracted text
         }
     } else {
         // Processing intelligent avec classification automatique

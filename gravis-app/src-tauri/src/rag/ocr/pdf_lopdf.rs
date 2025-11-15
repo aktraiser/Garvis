@@ -431,6 +431,7 @@ impl LopdFProcessor {
                 oem_used: OcrEngineMode::LstmOnly,
                 temp_files_created: Vec::new(),
             },
+            ocr_blocks: None,  // No layout analysis for fallback mode
         })
     }
 }

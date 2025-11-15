@@ -1,21 +1,15 @@
-// OCRPanel - Panel droit avec le viewer OCR et highlighting des spans
+// OCRPanel - Panel droit avec SimplePdfViewer
 
-import { OCRViewerWithSpans, type SourceSpan, type OCRContent } from '@/components/OCRViewerWithSpans';
+import SimplePdfViewer from '@/components/SimplePdfViewer';
 
 interface OCRPanelProps {
-  documentName: string;
-  ocrContent: OCRContent;
-  highlightedSpans: SourceSpan[];
-  onSpanClick?: (span: SourceSpan) => void;
-  onTextSelection?: (text: string) => void;
+  sessionId: string;
+  onTextAction?: (action: 'explain' | 'summarize', text: string) => void;
 }
 
 export function OCRPanel({
-  documentName,
-  ocrContent,
-  highlightedSpans,
-  onSpanClick,
-  onTextSelection
+  sessionId,
+  onTextAction
 }: OCRPanelProps) {
   return (
     <div style={{
@@ -29,12 +23,9 @@ export function OCRPanel({
       zIndex: 999,
       overflow: 'hidden',
     }}>
-      <OCRViewerWithSpans
-        documentName={documentName}
-        ocrContent={ocrContent}
-        highlightedSpans={highlightedSpans}
-        onSpanClick={onSpanClick}
-        onTextSelection={onTextSelection}
+      <SimplePdfViewer
+        sessionId={sessionId}
+        onTextAction={onTextAction}
       />
     </div>
   );

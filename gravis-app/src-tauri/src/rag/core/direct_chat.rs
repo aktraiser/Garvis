@@ -19,7 +19,11 @@ pub struct DirectChatSession {
     pub document_name: String,
     pub document_type: DocumentType,
     pub chunks: Vec<EnrichedChunk>,
-    pub ocr_content: OCRContent,
+    
+    // DÉCOUPLAGE: Affichage vs Embedding
+    pub display_content: DisplayContent,   // Pour l'affichage (PDF natif, texte original)
+    pub search_content: OCRContent,       // Pour l'embedding/recherche (OCR avec spans)
+    
     pub structured_data: Option<StructuredData>,
     pub embeddings: Vec<f32>,
     pub created_at: SystemTime,
@@ -51,7 +55,26 @@ pub struct SelectedRegion {
     pub rect: BoundingBox,
 }
 
-/// Contenu OCR structuré avec layout analysis
+/// Contenu d'affichage (PDF natif ou texte extrait proprement)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DisplayContent {
+    pub content_type: DisplayContentType,
+    pub native_text: Option<String>,        // Texte extrait nativement du PDF
+    pub pdf_url: Option<String>,           // URL ou path vers le PDF original
+    pub page_count: usize,
+    pub extraction_quality: f64,          // Qualité de l'extraction native (0.0-1.0)
+}
+
+/// Type de contenu pour l'affichage
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DisplayContentType {
+    PdfNative,      // PDF avec texte extractible -> afficher PDF original
+    PdfScanned,     // PDF scanné -> afficher avec overlay OCR
+    TextDocument,   // Document texte simple
+    Image,          // Image pure
+}
+
+/// Contenu OCR structuré avec layout analysis (pour embedding/recherche uniquement)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OCRContent {
     pub pages: Vec<OCRPage>,
@@ -71,6 +94,7 @@ pub struct OCRPage {
 /// Bloc OCR avec type et positionnement
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OCRBlock {
+    pub page_number: u32, // 🆕 Numéro de page pour mapping précis
     pub block_type: BlockType, // Text, Table, List, Header, etc.
     pub content: String,
     pub bounding_box: BoundingBox,
@@ -88,14 +112,19 @@ pub enum BlockType {
     KeyValue, // Pour "Salaire brut: 2500€"
     Amount,   // Montants monétaires
     Date,
+    Figure,   // Pour graphiques, diagrammes, images avec légendes
 }
 
-/// BoundingBox pour positionnement précis
+/// BoundingBox pour positionnement précis (coordonnées normalisées 0.0-1.0)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BoundingBox {
+    /// Position X normalisée (0.0-1.0) relative à la largeur de page
     pub x: f64,
+    /// Position Y normalisée (0.0-1.0) relative à la hauteur de page  
     pub y: f64,
+    /// Largeur normalisée (0.0-1.0) relative à la largeur de page
     pub width: f64,
+    /// Hauteur normalisée (0.0-1.0) relative à la hauteur de page
     pub height: f64,
 }
 
@@ -247,12 +276,13 @@ pub struct Transaction {
 }
 
 impl DirectChatSession {
-    /// Créer nouvelle session temporaire
+    /// Créer nouvelle session temporaire avec découplage affichage/embedding
     pub fn new(
         document_path: PathBuf,
         document_type: DocumentType,
         chunks: Vec<EnrichedChunk>,
-        ocr_content: OCRContent,
+        display_content: DisplayContent,
+        search_content: OCRContent,
     ) -> Self {
         let document_name = document_path
             .file_name()
@@ -266,12 +296,52 @@ impl DirectChatSession {
             document_name,
             document_type,
             chunks,
-            ocr_content,
+            display_content,
+            search_content,
             structured_data: None,
             embeddings: vec![],
             created_at: SystemTime::now(),
             is_temporary: true,
         }
+    }
+
+    /// Créer session avec contenu d'affichage PDF natif (nouveau constructeur recommandé)
+    pub fn new_with_native_pdf(
+        document_path: PathBuf,
+        document_type: DocumentType,
+        chunks: Vec<EnrichedChunk>,
+        native_text: String,
+        extraction_quality: f64,
+        ocr_content: OCRContent,
+    ) -> Self {
+        let display_content = DisplayContent {
+            content_type: DisplayContentType::PdfNative,
+            native_text: Some(native_text),
+            pdf_url: Some(document_path.to_string_lossy().to_string()),
+            page_count: 1, // TODO: detecter nombre de pages
+            extraction_quality,
+        };
+
+        Self::new(document_path, document_type, chunks, display_content, ocr_content)
+    }
+
+    /// Constructeur temporaire pour compatibilité (ancien format)
+    pub fn new_legacy(
+        document_path: PathBuf,
+        document_type: DocumentType,
+        chunks: Vec<EnrichedChunk>,
+        ocr_content: OCRContent,
+    ) -> Self {
+        // Créer un DisplayContent de fallback
+        let display_content = DisplayContent {
+            content_type: DisplayContentType::PdfScanned, // Par défaut OCR
+            native_text: None,
+            pdf_url: Some(format!("file://{}", document_path.to_string_lossy())),
+            page_count: ocr_content.pages.len(),
+            extraction_quality: ocr_content.total_confidence,
+        };
+
+        Self::new(document_path, document_type, chunks, display_content, ocr_content)
     }
 
     /// Ajouter données structurées après extraction

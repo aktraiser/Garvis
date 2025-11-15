@@ -164,6 +164,8 @@ pub struct GroupDocument {
     pub last_modified: SystemTime,
     pub document_type: DocumentType,
     pub group_id: String,
+    #[serde(default)]
+    pub ocr_blocks: Vec<crate::rag::core::direct_chat::OCRBlock>,  // Figure blocks from PDF extraction
 }
 
 /// Type de document avec stratégies intelligentes - Phase 1 OCR

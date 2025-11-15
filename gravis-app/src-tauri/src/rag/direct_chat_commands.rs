@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::State;
-use tracing::{info, warn, error};
+use tracing::{info, warn, error, debug};
 
 use crate::rag::{
     DocumentProcessor, TesseractProcessor, TesseractConfig, CustomE5Embedder,
@@ -65,6 +65,13 @@ pub struct ChatRequest {
     pub query: String,
     pub selection: Option<SelectionContext>,
     pub limit: Option<usize>,
+}
+
+/// Réponse pour URL de PDF temporaire
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TempPdfUrlResponse {
+    pub pdf_url: String,
+    pub original_path: String,
 }
 
 /// Réponse enrichie de chat direct
@@ -154,7 +161,7 @@ pub async fn process_dropped_document(
     
     info!("✅ Generated {} embeddings during processing", embedded_count);
 
-    let session = DirectChatSession::new(
+    let session = DirectChatSession::new_legacy(
         temp_path.clone(),
         document_type,
         enriched_chunks,
@@ -179,10 +186,9 @@ pub async fn process_dropped_document(
     info!("✅ Created direct chat session {} with {} chunks ({} embedded) in {}ms",
           session_id, chunks_created, embedded_chunks, processing_time);
 
-    // 9. Nettoyer le fichier temporaire
-    if let Err(e) = std::fs::remove_file(&temp_path) {
-        warn!("Failed to clean up temp file {:?}: {}", temp_path, e);
-    }
+    // 9. NE PAS supprimer le fichier temporaire - conservé pour affichage PDF
+    // Le fichier sera nettoyé lors du cleanup de la session via cleanup_direct_chat_session
+    info!("📌 Keeping temp file for PDF display: {:?}", temp_path);
 
     Ok(ProcessDocumentResponse {
         session: updated_session,
@@ -268,7 +274,7 @@ pub async fn get_direct_chat_session(
         .map_err(|e| format!("Session retrieval failed: {}", e))
 }
 
-/// Supprimer session temporaire
+/// Supprimer session temporaire et nettoyer fichier PDF associé
 #[tauri::command]
 pub async fn cleanup_direct_chat_session(
     session_id: String,
@@ -276,6 +282,22 @@ pub async fn cleanup_direct_chat_session(
 ) -> Result<(), String> {
     info!("🗑️ Cleaning up direct chat session: {}", session_id);
 
+    // 1. Récupérer la session avant suppression pour obtenir le path du fichier
+    if let Ok(session) = state.manager.get_session(&session_id).await {
+        let temp_path = &session.document_path;
+
+        // 2. Supprimer le fichier temporaire si c'est un PDF
+        if temp_path.exists() && temp_path.to_string_lossy().contains("gravis_temp_") {
+            info!("🗑️ Removing temporary file: {:?}", temp_path);
+            if let Err(e) = std::fs::remove_file(temp_path) {
+                warn!("Failed to remove temp file {:?}: {}", temp_path, e);
+            } else {
+                info!("✅ Temporary file removed successfully");
+            }
+        }
+    }
+
+    // 3. Supprimer la session de la mémoire
     state.manager
         .remove_session(&session_id)
         .await
@@ -308,6 +330,42 @@ pub async fn cleanup_expired_sessions(
     Ok(cleaned_count)
 }
 
+/// Récupérer le PDF associé à une session (pour affichage dans PdfSemanticOverlay)
+#[tauri::command]
+pub async fn get_pdf_for_session(
+    session_id: String,
+    state: State<'_, DirectChatState>,
+) -> Result<Vec<u8>, String> {
+    info!("📄 Fetching PDF for session: {}", session_id);
+
+    // 1. Récupérer la session
+    let session = state.manager
+        .get_session(&session_id)
+        .await
+        .map_err(|e| format!("Session not found: {}", e))?;
+
+    // 2. Vérifier que c'est bien un PDF
+    let path = &session.document_path;
+    if !path.exists() {
+        return Err(format!("PDF file not found: {:?}", path));
+    }
+
+    let extension = path.extension()
+        .and_then(|ext| ext.to_str())
+        .ok_or_else(|| format!("Invalid file extension for: {:?}", path))?;
+
+    if extension.to_lowercase() != "pdf" {
+        return Err(format!("File is not a PDF: {:?}", path));
+    }
+
+    // 3. Lire le fichier PDF en bytes
+    let pdf_bytes = std::fs::read(path)
+        .map_err(|e| format!("Failed to read PDF file: {}", e))?;
+
+    info!("✅ PDF loaded: {} bytes", pdf_bytes.len());
+    Ok(pdf_bytes)
+}
+
 // === Fonctions utilitaires ===
 
 /// Résoudre le chemin du fichier (compatible avec architecture existante)
@@ -329,50 +387,900 @@ fn resolve_file_path(file_path: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// Créer contenu OCR à partir du document traité (MVP - structure basique)
+/// Détection intelligente du type de contenu pour un bloc de lignes
+fn detect_content_type(lines: &[&str], start_idx: usize) -> (BlockType, usize) {
+    if start_idx >= lines.len() {
+        return (BlockType::Text, 1);
+    }
+
+    let current_line = lines[start_idx].trim();
+    
+    // 1. Détecter Figure/Chart (graphiques avec données)
+    if let Some(lines_consumed) = detect_figure_content(lines, start_idx) {
+        return (BlockType::Figure, lines_consumed);
+    }
+    
+    // 2. Détecter Tables structurées
+    if let Some(lines_consumed) = detect_table_content(lines, start_idx) {
+        return (BlockType::Table, lines_consumed);
+    }
+    
+    // 3. Détecter Table des matières / Listes numérotées
+    if let Some(lines_consumed) = detect_toc_or_list(lines, start_idx) {
+        return (BlockType::List, lines_consumed);
+    }
+    
+    // 4. Détecter Headers
+    if is_likely_header(current_line) {
+        return (BlockType::Header, 1);
+    }
+    
+    // 5. Détecter Key-Value pairs
+    if is_key_value_pair(current_line) {
+        return (BlockType::KeyValue, 1);
+    }
+    
+    // 6. Détecter montants/dates
+    if is_amount_or_date(current_line) {
+        return (BlockType::Amount, 1);
+    }
+    
+    // Par défaut: Text
+    (BlockType::Text, 1)
+}
+
+/// Détecter contenu de figure/graphique avec données numériques
+fn detect_figure_content(lines: &[&str], start_idx: usize) -> Option<usize> {
+    let mut lines_consumed = 0;
+    let mut has_figure_indicators = false;
+    let mut has_numerical_data = false;
+    let mut has_percentage_data = false;
+
+    for i in start_idx..std::cmp::min(start_idx + 10, lines.len()) {
+        let line = lines[i].trim();
+        
+        if line.is_empty() {
+            lines_consumed += 1;
+            continue;
+        }
+
+        // Indicateurs de figure/graphique
+        if line.contains("Figure") || line.contains("Chart") || line.contains("Graph") 
+            || line.contains("Compression") || line.contains("Performance") {
+            has_figure_indicators = true;
+        }
+
+        // Données numériques avec axes/échelles
+        if line.contains("600-700") || line.contains("0%") || line.contains("100%") 
+            || line.contains("Vision Tokens") || line.contains("Edit Distance") {
+            has_numerical_data = true;
+        }
+
+        // Pourcentages multiples (données de graphique)
+        let percentage_count = line.matches('%').count();
+        if percentage_count >= 2 {
+            has_percentage_data = true;
+        }
+
+        lines_consumed += 1;
+
+        // Stop si on trouve une ligne clairement non-figure
+        if line.len() > 200 && !line.contains("%") && !line.contains("Figure") {
+            break;
+        }
+    }
+
+    if (has_figure_indicators && has_numerical_data) || has_percentage_data {
+        Some(lines_consumed)
+    } else {
+        None
+    }
+}
+
+/// Détecter contenu tabulaire avec colonnes alignées
+fn detect_table_content(lines: &[&str], start_idx: usize) -> Option<usize> {
+    let mut lines_consumed = 0;
+    let mut consistent_columns = 0;
+    let mut total_potential_rows = 0;
+
+    for i in start_idx..std::cmp::min(start_idx + 8, lines.len()) {
+        let line = lines[i].trim();
+        
+        if line.is_empty() {
+            lines_consumed += 1;
+            continue;
+        }
+
+        // Détecter séparateurs tabulaires
+        let separators = ["\t", "  ", " | ", "|"];
+        let mut max_columns = 0;
+        
+        for sep in &separators {
+            let columns = line.split(sep).filter(|s| !s.trim().is_empty()).count();
+            max_columns = max_columns.max(columns);
+        }
+
+        if max_columns >= 2 {
+            if consistent_columns == 0 {
+                consistent_columns = max_columns;
+            }
+            
+            // Vérifier cohérence des colonnes
+            if max_columns >= consistent_columns / 2 {
+                total_potential_rows += 1;
+            }
+        }
+
+        lines_consumed += 1;
+
+        // Stop si trop de lignes sans structure tabulaire
+        if total_potential_rows == 0 && lines_consumed > 3 {
+            break;
+        }
+    }
+
+    // Au moins 2 lignes avec structure cohérente = table
+    if total_potential_rows >= 2 {
+        Some(lines_consumed)
+    } else {
+        None
+    }
+}
+
+/// Détecter table des matières ou listes numérotées
+fn detect_toc_or_list(lines: &[&str], start_idx: usize) -> Option<usize> {
+    let mut lines_consumed = 0;
+    let mut numbered_lines = 0;
+    let mut toc_pattern_lines = 0;
+
+    for i in start_idx..std::cmp::min(start_idx + 6, lines.len()) {
+        let line = lines[i].trim();
+        
+        if line.is_empty() {
+            lines_consumed += 1;
+            continue;
+        }
+
+        // Patterns de TOC
+        if line.matches('.').count() >= 3 {  // "3.2.1 Architecture..."
+            toc_pattern_lines += 1;
+        }
+
+        // Listes numérotées ou bullet points
+        if line.starts_with("1 ") || line.starts_with("2 ") || line.starts_with("3 ") 
+            || line.starts_with("• ") || line.starts_with("- ") 
+            || line.starts_with("1.") || line.starts_with("2.") {
+            numbered_lines += 1;
+        }
+
+        // TOC sections avec numéros
+        if line.contains("Introduction") || line.contains("Methodology") || line.contains("Discussion") 
+            || line.contains("Conclusion") || line.contains("Related Works") {
+            toc_pattern_lines += 1;
+        }
+
+        lines_consumed += 1;
+    }
+
+    if numbered_lines >= 2 || toc_pattern_lines >= 2 {
+        Some(lines_consumed)
+    } else {
+        None
+    }
+}
+
+/// Vérifier si une ligne est probablement un header (version améliorée)
+fn is_likely_header(line: &str) -> bool {
+    let line = line.trim();
+
+    // Headers typiques: courts, majuscules, ou numérotés
+    let is_short = line.len() < 80;
+    let has_many_caps = line.chars().filter(|c| c.is_uppercase()).count() as f32 / line.len().max(1) as f32 > 0.5;
+    let starts_with_number = line.chars().next().map(|c| c.is_numeric()).unwrap_or(false);
+    let is_numbered_section = line.starts_with("1 ") || line.starts_with("2 ") ||
+                              line.starts_with("3 ") || line.starts_with("4 ") ||
+                              line.starts_with("1.") || line.starts_with("2.") ||
+                              line.starts_with("3.") || line.starts_with("4.");
+
+    // Headers spécifiques aux papers scientifiques
+    let is_academic_header = line == "Abstract" || line == "Introduction" || line == "Methodology" 
+                            || line == "Evaluation" || line == "Discussion" || line == "Conclusion"
+                            || line == "Related Works" || line == "Contents";
+
+    (is_short && has_many_caps) || is_numbered_section || is_academic_header
+}
+
+/// Détecter paires clé-valeur
+fn is_key_value_pair(line: &str) -> bool {
+    line.contains(": ") && line.split(": ").count() == 2 && line.len() < 150
+}
+
+/// Détecter montants/dates
+fn is_amount_or_date(line: &str) -> bool {
+    // Montants monétaires
+    let has_currency = line.contains("$") || line.contains("€") || line.contains("£");
+    
+    // Dates
+    let has_date_pattern = line.contains("2024") || line.contains("2025") 
+                          || line.contains("/") && line.chars().filter(|c| c.is_numeric()).count() >= 4;
+
+    (has_currency || has_date_pattern) && line.len() < 100
+}
+
+/// Structurer le contenu d'une figure avec données numériques
+fn structure_figure_content(lines: &[&str]) -> String {
+    let mut structured = String::new();
+    let content = lines.join(" ");
+
+    // 1. Détecter le titre de la figure
+    if let Some(title_line) = lines.iter().find(|line| line.contains("Figure") || line.contains("Chart")) {
+        structured.push_str("📊 **");
+        structured.push_str(title_line.trim());
+        structured.push_str("**\n\n");
+    }
+
+    // 2. Extraire les données numériques
+    let mut _data_points: Vec<String> = Vec::new();
+    let mut performance_metrics = Vec::new();
+
+    for line in lines {
+        // Données avec pourcentages (ex: "96.5% 93.8% 83.8%")
+        if line.matches('%').count() >= 2 {
+            let percentages: Vec<&str> = line.split_whitespace()
+                .filter(|s| s.contains('%'))
+                .collect();
+            if !percentages.is_empty() {
+                structured.push_str("📈 **Performance Data:**\n");
+                for (i, perc) in percentages.iter().enumerate() {
+                    structured.push_str(&format!("  • Point {}: {}\n", i + 1, perc));
+                }
+                structured.push('\n');
+            }
+        }
+
+        // Données de compression/tokens (ex: "600-700 700-800")
+        if line.contains("-") && line.chars().filter(|c| c.is_numeric()).count() >= 4 {
+            let ranges: Vec<&str> = line.split_whitespace()
+                .filter(|s| s.contains('-') && s.chars().any(|c| c.is_numeric()))
+                .collect();
+            if !ranges.is_empty() {
+                structured.push_str("📏 **Data Ranges:**\n");
+                for range in ranges {
+                    structured.push_str(&format!("  • {}\n", range));
+                }
+                structured.push('\n');
+            }
+        }
+
+        // Vision tokens / métriques de performance
+        if line.contains("Vision Tokens") || line.contains("Edit Distance") || line.contains("Compression") {
+            performance_metrics.push(*line);
+        }
+    }
+
+    // 3. Ajouter métriques de performance
+    if !performance_metrics.is_empty() {
+        structured.push_str("⚡ **Performance Metrics:**\n");
+        for metric in performance_metrics {
+            structured.push_str(&format!("  • {}\n", metric.trim()));
+        }
+        structured.push('\n');
+    }
+
+    // 4. Si pas de structure détectée, afficher le contenu brut organisé
+    if structured.is_empty() || structured.len() < 50 {
+        structured.clear();
+        structured.push_str("📊 **Figure/Chart Data**\n\n");
+        structured.push_str(&content);
+    }
+
+    structured
+}
+
+/// Structurer le contenu tabulaire
+fn structure_table_content(lines: &[&str]) -> String {
+    let mut structured = String::new();
+    structured.push_str("📋 **Table Data**\n\n");
+
+    let mut is_first_row = true;
+
+    for line in lines {
+        let line = line.trim();
+        if line.is_empty() { continue; }
+
+        // Essayer différents séparateurs
+        let separators = ["\t", "  ", " | ", "|"];
+        let mut best_columns = Vec::new();
+        let mut max_columns = 0;
+
+        for sep in &separators {
+            let columns: Vec<&str> = line.split(sep)
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+            
+            if columns.len() > max_columns {
+                max_columns = columns.len();
+                best_columns = columns;
+            }
+        }
+
+        if best_columns.len() >= 2 {
+            // Format en table markdown
+            if is_first_row {
+                structured.push_str("| ");
+                structured.push_str(&best_columns.join(" | "));
+                structured.push_str(" |\n");
+                
+                // Ligne de séparation
+                structured.push_str("|");
+                for _ in 0..best_columns.len() {
+                    structured.push_str("---|");
+                }
+                structured.push('\n');
+                is_first_row = false;
+            } else {
+                structured.push_str("| ");
+                structured.push_str(&best_columns.join(" | "));
+                structured.push_str(" |\n");
+            }
+        } else {
+            // Ligne simple si pas assez de colonnes
+            structured.push_str(&format!("• {}\n", line));
+        }
+    }
+
+    structured
+}
+
+/// Structurer les listes et tables des matières
+fn structure_list_content(lines: &[&str]) -> String {
+    let mut structured = String::new();
+    
+    // Détecter le type de liste
+    let has_toc_patterns = lines.iter().any(|line| 
+        line.matches('.').count() >= 3 || 
+        line.contains("Introduction") || 
+        line.contains("Methodology")
+    );
+
+    if has_toc_patterns {
+        structured.push_str("📚 **Table of Contents**\n\n");
+    } else {
+        structured.push_str("📝 **Structured List**\n\n");
+    }
+
+    for line in lines {
+        let line = line.trim();
+        if line.is_empty() { continue; }
+
+        // Formater selon le type de ligne
+        if line.chars().next().map(|c| c.is_numeric()).unwrap_or(false) {
+            // Ligne numérotée
+            structured.push_str(&format!("  {}\n", line));
+        } else if line.starts_with("• ") || line.starts_with("- ") {
+            // Bullet point
+            structured.push_str(&format!("  {}\n", line));
+        } else {
+            // Autre type de liste
+            structured.push_str(&format!("  • {}\n", line));
+        }
+    }
+
+    structured
+}
+
+/// NOUVELLE FONCTION - Reconstruction intelligente des blocs selon les best practices 2024
+fn reconstruct_block_content(
+    lines: &[&str], 
+    start_idx: usize, 
+    block_type: BlockType, 
+    initial_lines_consumed: usize
+) -> (String, usize) {
+    
+    match block_type {
+        BlockType::Text => reconstruct_paragraph_block(lines, start_idx),
+        BlockType::Table => reconstruct_table_block(lines, start_idx, initial_lines_consumed),
+        BlockType::Figure => reconstruct_figure_block(lines, start_idx, initial_lines_consumed),
+        BlockType::List => reconstruct_list_block(lines, start_idx, initial_lines_consumed),
+        _ => {
+            // Pour Header, KeyValue, Amount - retour simple
+            let line = lines.get(start_idx).unwrap_or(&"").trim();
+            (line.to_string(), 1)
+        }
+    }
+}
+
+/// Reconstruction de paragraphes - Regroupement intelligent basé sur la proximité sémantique
+fn reconstruct_paragraph_block(lines: &[&str], start_idx: usize) -> (String, usize) {
+    let mut paragraph_lines = Vec::new();
+    let mut lines_consumed = 0;
+    
+    for i in start_idx..lines.len() {
+        let line = lines[i].trim();
+        
+        if line.is_empty() {
+            lines_consumed += 1;
+            break; // Fin du paragraphe sur ligne vide
+        }
+        
+        // Détecter fin de paragraphe
+        if i > start_idx && is_paragraph_break(lines, i) {
+            break;
+        }
+        
+        paragraph_lines.push(line);
+        lines_consumed += 1;
+        
+        // Limite de sécurité pour éviter les paragraphes trop longs
+        if paragraph_lines.len() >= 20 {
+            break;
+        }
+    }
+    
+    // Joindre avec espaces, gérer la ponctuation intelligemment
+    let content = join_paragraph_lines(&paragraph_lines);
+    (content, lines_consumed)
+}
+
+/// Détection intelligente des fins de paragraphe
+fn is_paragraph_break(lines: &[&str], idx: usize) -> bool {
+    let current = lines[idx].trim();
+    let previous = if idx > 0 { lines[idx - 1].trim() } else { "" };
+    
+    // Nouvelle section numérotée
+    if current.chars().next().map(|c| c.is_numeric()).unwrap_or(false) {
+        if current.contains('.') && current.len() < 50 {
+            return true;
+        }
+    }
+    
+    // Nouveau header détecté
+    if is_likely_header(current) {
+        return true;
+    }
+    
+    // Figure/Table markers
+    if current.contains("Figure") || current.contains("Table") || current.contains("Chart") {
+        return true;
+    }
+    
+    // Fin de phrase + Nouvelle phrase avec majuscule
+    if previous.ends_with('.') || previous.ends_with(':') {
+        if current.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+            // Mais pas si c'est une continuation logique
+            if !current.starts_with("The") && !current.starts_with("This") && !current.starts_with("We") {
+                return current.len() > 30; // Nouvelle phrase substantielle
+            }
+        }
+    }
+    
+    false
+}
+
+/// Jointure intelligente des lignes de paragraphe avec gestion ponctuation
+fn join_paragraph_lines(lines: &[&str]) -> String {
+    if lines.is_empty() {
+        return String::new();
+    }
+    
+    let mut result = String::new();
+    
+    for (i, line) in lines.iter().enumerate() {
+        if i == 0 {
+            result.push_str(line);
+        } else {
+            // Gestion intelligente des espaces selon la ponctuation
+            let prev_line = lines[i - 1];
+            let needs_space = !prev_line.ends_with('-') && !line.starts_with('-');
+            
+            if needs_space {
+                result.push(' ');
+            }
+            
+            // Supprimer tiret de césure si présent
+            if prev_line.ends_with('-') && !line.starts_with('-') {
+                result.pop(); // Enlever le tiret
+            }
+            
+            result.push_str(line);
+        }
+    }
+    
+    result
+}
+
+/// Reconstruction de blocs table - Garder la structure spatiale
+fn reconstruct_table_block(lines: &[&str], start_idx: usize, initial_consumed: usize) -> (String, usize) {
+    let mut table_lines = Vec::new();
+    let mut lines_consumed = 0;
+    
+    // Collecter toutes les lignes qui semblent tabulaires
+    for i in start_idx..std::cmp::min(start_idx + initial_consumed + 10, lines.len()) {
+        let line = lines[i].trim();
+        
+        if line.is_empty() {
+            lines_consumed += 1;
+            if table_lines.len() > 0 {
+                table_lines.push(""); // Garder les lignes vides dans les tables
+            }
+            continue;
+        }
+        
+        // Stop si nouvelle section détectée
+        if is_likely_header(line) || line.contains("Figure") {
+            break;
+        }
+        
+        table_lines.push(line);
+        lines_consumed += 1;
+    }
+    
+    // Joindre avec retours à la ligne pour préserver la structure
+    let content = table_lines.join("\n");
+    (content, lines_consumed)
+}
+
+/// Reconstruction de blocs figure - Regrouper données numériques cohérentes  
+fn reconstruct_figure_block(lines: &[&str], start_idx: usize, initial_consumed: usize) -> (String, usize) {
+    let mut figure_lines = Vec::new();
+    let mut lines_consumed = 0;
+    let mut in_data_section = false;
+    
+    for i in start_idx..std::cmp::min(start_idx + initial_consumed + 15, lines.len()) {
+        let line = lines[i].trim();
+        
+        if line.is_empty() {
+            lines_consumed += 1;
+            continue;
+        }
+        
+        // Stop conditions
+        if i > start_idx && is_likely_header(line) {
+            break;
+        }
+        
+        // Détecter sections de données
+        let has_percentages = line.matches('%').count() >= 1;
+        let has_numbers = line.chars().filter(|c| c.is_numeric()).count() >= 3;
+        let has_ranges = line.contains('-') && has_numbers;
+        
+        if has_percentages || has_ranges || line.contains("Vision Tokens") || line.contains("Figure") {
+            in_data_section = true;
+            figure_lines.push(line);
+            lines_consumed += 1;
+        } else if in_data_section && line.len() > 100 {
+            // Long texte = fin de la figure
+            break;
+        } else if in_data_section || line.contains("Compression") || line.contains("Performance") {
+            figure_lines.push(line);
+            lines_consumed += 1;
+        } else {
+            break;
+        }
+    }
+    
+    let content = figure_lines.join(" ");
+    (content, lines_consumed)
+}
+
+/// Reconstruction de listes - Préserver structure hiérarchique
+fn reconstruct_list_block(lines: &[&str], start_idx: usize, initial_consumed: usize) -> (String, usize) {
+    let mut list_lines = Vec::new();
+    let mut lines_consumed = 0;
+    
+    for i in start_idx..std::cmp::min(start_idx + initial_consumed + 8, lines.len()) {
+        let line = lines[i].trim();
+        
+        if line.is_empty() {
+            lines_consumed += 1;
+            continue;
+        }
+        
+        // Stop si plus de structure de liste
+        if !line.chars().next().map(|c| c.is_numeric() || c == '•' || c == '-').unwrap_or(false) {
+            if !line.contains('.') || line.len() > 100 {
+                break;
+            }
+        }
+        
+        list_lines.push(line);
+        lines_consumed += 1;
+    }
+    
+    let content = list_lines.join("\n");
+    (content, lines_consumed)
+}
+
+// ============================================================================
+// NATIVE OCR BLOCKS - PR #4 Phase 3
+// ============================================================================
+
+/// Structure pour blocs OCR natifs provenant de l'extraction initiale
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct NativeOCRBlock {  // 🆕 pub pour utilisation depuis document_processor
+    pub page_number: u32,
+    pub block_type: String,   // "header", "paragraph", "table", "figure", etc.
+    pub text: String,
+    pub bbox: NativeBBox,
+    pub confidence: f64,
+    #[serde(default)]  // Pour compatibilité ascendante
+    pub page_width: Option<f64>,
+    #[serde(default)]
+    pub page_height: Option<f64>,
+}
+
+/// Bounding box native (pixels absolus)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct NativeBBox {  // 🆕 pub pour utilisation depuis document_processor
+    pub x: f64,      // Position X en pixels
+    pub y: f64,      // Position Y en pixels
+    pub width: f64,  // Largeur en pixels
+    pub height: f64, // Hauteur en pixels
+}
+
+/// Parser les blocs OCR natifs depuis metadata JSON
+fn parse_native_ocr_blocks(raw_ocr: &serde_json::Value) -> Result<OCRContent, String> {
+    // On attend: { "blocks": [...] } ou directement [...]
+    let blocks_json = if raw_ocr.get("blocks").is_some() {
+        &raw_ocr["blocks"]
+    } else {
+        raw_ocr
+    };
+
+    let native_blocks: Vec<NativeOCRBlock> = serde_json::from_value(blocks_json.clone())
+        .map_err(|e| format!("Erreur de parsing des blocs OCR natifs: {}", e))?;
+
+    if native_blocks.is_empty() {
+        return Err("Aucun bloc OCR natif trouvé".into());
+    }
+
+    // Grouper par page
+    use std::collections::HashMap;
+    let mut pages_map: HashMap<u32, (Vec<OCRBlock>, f64, f64)> = HashMap::new();
+
+    for nb in native_blocks {
+        let block_type = map_block_type_from_str(&nb.block_type);
+
+        // On garde les coordonnées en pixels pour l'instant
+        // Le frontend fera la normalisation
+        let ocr_block = OCRBlock {
+            page_number: nb.page_number,
+            block_type,
+            content: nb.text,
+            bounding_box: BoundingBox {
+                x: nb.bbox.x,
+                y: nb.bbox.y,
+                width: nb.bbox.width,
+                height: nb.bbox.height,
+            },
+            confidence: nb.confidence,
+            spans: Vec::new(), // On les peuplera plus tard
+        };
+
+        // Stocker les blocs + dimensions de page
+        // Utiliser dimensions du bloc si disponibles, sinon A4 par défaut
+        let (width, height) = (
+            nb.page_width.unwrap_or(595.0),
+            nb.page_height.unwrap_or(842.0)
+        );
+
+        let entry = pages_map.entry(nb.page_number)
+            .or_insert_with(|| (Vec::new(), width, height));
+
+        // Mettre à jour les dimensions si on a de vraies valeurs
+        if nb.page_width.is_some() && nb.page_height.is_some() {
+            entry.1 = width;
+            entry.2 = height;
+        }
+
+        entry.0.push(ocr_block);
+    }
+
+    // Construire les OCRPage
+    let mut pages: Vec<OCRPage> = pages_map
+        .into_iter()
+        .map(|(page_number, (blocks, width, height))| {
+            debug!("📄 Page {}: {}x{} with {} blocks", page_number, width, height, blocks.len());
+            OCRPage {
+                page_number,
+                width,
+                height,
+                blocks,
+            }
+        })
+        .collect();
+
+    pages.sort_by_key(|p| p.page_number);
+
+    // Calculer confidence moyenne
+    let total_conf = if !pages.is_empty() {
+        let mut sum = 0.0;
+        let mut count = 0;
+        for p in &pages {
+            for b in &p.blocks {
+                sum += b.confidence;
+                count += 1;
+            }
+        }
+        if count > 0 { sum / (count as f64) } else { 0.0 }
+    } else {
+        0.0
+    };
+
+    // Analyse de layout basique
+    let all_blocks: Vec<_> = pages.iter().flat_map(|p| &p.blocks).collect();
+    let layout_analysis = LayoutAnalysis {
+        detected_columns: 1,
+        has_tables: all_blocks.iter().any(|b| matches!(b.block_type, BlockType::Table)),
+        has_headers: all_blocks.iter().any(|b| matches!(b.block_type, BlockType::Header)),
+        text_density: 0.7,
+        dominant_font_size: Some(12.0),
+    };
+
+    info!("✅ Parsed {} pages with {} total blocks from native OCR",
+          pages.len(),
+          all_blocks.len());
+
+    Ok(OCRContent {
+        pages,
+        total_confidence: total_conf,
+        layout_analysis,
+    })
+}
+
+/// Mapper string vers BlockType
+fn map_block_type_from_str(s: &str) -> BlockType {
+    match s.to_lowercase().as_str() {
+        "header" | "title" | "heading" => BlockType::Header,
+        "paragraph" | "text" => BlockType::Text,
+        "table" => BlockType::Table,
+        "figure" | "image" => BlockType::Figure,
+        "list" | "bullet_list" | "numbered_list" => BlockType::List,
+        "keyvalue" | "key_value" | "field" => BlockType::KeyValue,
+        "amount" | "money" => BlockType::Amount,
+        "date" => BlockType::Date,
+        _ => BlockType::Text,
+    }
+}
+
+/// Créer contenu OCR à partir du document traité avec analyse de structure
+/// VERSION REFACTORISÉE PR #4 - Utilise blocs natifs quand disponibles
 fn create_ocr_content_from_document(
     document: &crate::rag::GroupDocument
 ) -> Result<OCRContent, String> {
-    // Pour MVP: créer structure OCR basique à partir des chunks
+    // 1️⃣ Priorité: Blocs OCR natifs dans metadata.custom_fields
+    if let Some(raw_ocr_str) = document.metadata.custom_fields.get("ocr_blocks") {
+        info!("🎯 Using native OCR blocks from metadata");
+        // Parser le JSON depuis le string
+        match serde_json::from_str::<serde_json::Value>(raw_ocr_str) {
+            Ok(raw_ocr) => {
+                match parse_native_ocr_blocks(&raw_ocr) {
+                    Ok(ocr_content) => return Ok(ocr_content),
+                    Err(e) => {
+                        warn!("⚠️ Failed to parse native OCR blocks: {}, falling back to synthetic", e);
+                    }
+                }
+            },
+            Err(e) => {
+                warn!("⚠️ Failed to parse OCR blocks JSON: {}, falling back to synthetic", e);
+            }
+        }
+    }
+
+    // 2️⃣ Fallback: Reconstruction synthétique (ancienne méthode)
+    warn!("⚠️ No native OCR blocks found, using synthetic reconstruction (1 page only)");
+    create_synthetic_ocr_content(document)
+}
+
+/// Créer contenu OCR synthétique (ancien système - fallback uniquement)
+fn create_synthetic_ocr_content(
+    document: &crate::rag::GroupDocument
+) -> Result<OCRContent, String> {
     let mut blocks = Vec::new();
-    
-    for (idx, chunk) in document.chunks.iter().enumerate() {
-        // Déterminer type de bloc basique
-        let block_type = match chunk.chunk_type {
-            crate::rag::ChunkType::Function => BlockType::Text,
-            crate::rag::ChunkType::Class => BlockType::Header,
-            crate::rag::ChunkType::Module => BlockType::Header,
-            crate::rag::ChunkType::TextBlock => BlockType::Text,
-            crate::rag::ChunkType::Comment => BlockType::Text,
+
+    // First, add any OCR blocks from PDF extraction (figures/images)
+    blocks.extend(document.ocr_blocks.clone());
+
+    // Analyser le contenu complet pour détecter la structure
+    let content_lines: Vec<&str> = document.content.lines().collect();
+    let mut current_y = if !document.ocr_blocks.is_empty() {
+        document.ocr_blocks.len() as f64 * 150.0  // Espace après les figures
+    } else {
+        40.0
+    };
+
+    let mut i = 0;
+    while i < content_lines.len() {
+        let line = content_lines[i].trim();
+
+        if line.is_empty() {
+            i += 1;
+            current_y += 20.0; // Espacement pour ligne vide
+            continue;
+        }
+
+        // 🎯 NOUVELLE DÉTECTION INTELLIGENTE AVEC LOOK-AHEAD
+        let (block_type, lines_consumed) = detect_content_type(&content_lines, i);
+        
+        // 📝 RECONSTRUCTION INTELLIGENTE DES BLOCS SELON LE TYPE
+        let (block_content, actual_lines_consumed) = reconstruct_block_content(&content_lines, i, block_type.clone(), lines_consumed);
+
+        if block_content.trim().is_empty() {
+            i += 1;
+            continue;
+        }
+
+        // 📊 Créer le contenu structuré selon le type
+        let (final_content, confidence, height_multiplier) = match block_type {
+            BlockType::Figure => {
+                // Structurer les données de figure
+                let structured_content = structure_figure_content(&[&block_content]);
+                (structured_content, 0.85, 2.5)
+            },
+            BlockType::Table => {
+                // Structurer les données tabulaires 
+                let structured_content = structure_table_content(&[&block_content]);
+                (structured_content, 0.88, 1.8)
+            },
+            BlockType::List => {
+                // Structurer TOC/liste numérotée
+                let structured_content = structure_list_content(&[&block_content]);
+                (structured_content, 0.92, 1.5)
+            },
+            BlockType::Header => {
+                (block_content.clone(), 0.95, 1.2)
+            },
+            BlockType::KeyValue => {
+                (block_content.clone(), 0.90, 1.0)
+            },
+            BlockType::Amount => {
+                (block_content.clone(), 0.93, 1.0)
+            },
+            _ => {
+                // Text par défaut
+                (block_content.clone(), 0.90, 1.0)
+            }
         };
 
-        // Position estimée (MVP - layout simple)
-        let y_position = idx as f64 * 100.0; // Espacement vertical
-        let bounding_box = BoundingBox {
-            x: 10.0,
-            y: y_position,
-            width: 580.0, // Largeur standard A4
-            height: 80.0,  // Hauteur estimée
+        // Calculer dimensions et position
+        let line_count = final_content.lines().count().max(1);
+        let base_height = (line_count as f64 * 20.0).max(30.0);
+        let calculated_height = base_height * height_multiplier;
+        
+        // Ajuster largeur selon le type
+        let width = match block_type {
+            BlockType::Figure | BlockType::Table => 580.0, // Pleine largeur
+            BlockType::Header => 580.0,
+            _ => 560.0
         };
-
-        // Confidence depuis les métadonnées OCR si disponible
-        let confidence = chunk.metadata.ocr_metadata
-            .as_ref()
-            .map(|_ocr| 0.95) // Default confidence since OcrMetadata doesn't have confidence field
-            .unwrap_or(chunk.metadata.confidence as f64);
 
         let block = OCRBlock {
-            block_type,
-            content: chunk.content.clone(),
-            bounding_box,
+            page_number: 1, // Fallback synthétique = toujours page 1
+            block_type: block_type.clone(),
+            content: final_content,
+            bounding_box: BoundingBox {
+                x: 10.0,
+                y: current_y,
+                width,
+                height: calculated_height,
+            },
             confidence,
-            spans: chunk.source_spans
-                .as_ref()
-                .cloned()
-                .unwrap_or_default(),
+            spans: Vec::new(),
         };
 
         blocks.push(block);
+        
+        // Espacement adaptatif selon le type
+        let spacing = match block_type {
+            BlockType::Figure => 60.0, // Plus d'espace après les figures
+            BlockType::Header => 40.0,
+            BlockType::Table => 50.0,
+            _ => 30.0
+        };
+        
+        current_y += calculated_height + spacing;
+        i += actual_lines_consumed.max(1); // Avancer du nombre de lignes RÉELLEMENT consommées
     }
 
     // Page unique pour MVP
@@ -709,7 +1617,7 @@ fn calculate_session_confidence(session: &DirectChatSession) -> f64 {
         .sum::<f64>() / session.chunks.len() as f64;
 
     // Facteur OCR
-    let ocr_factor = session.ocr_content.total_confidence;
+    let ocr_factor = session.search_content.total_confidence;
     
     // Facteur embeddings
     let embedding_factor = if session.embedded_chunks_count() > 0 {
@@ -719,7 +1627,33 @@ fn calculate_session_confidence(session: &DirectChatSession) -> f64 {
     };
 
     // Moyenne pondérée
-    (avg_chunk_confidence * 0.4 + ocr_factor * 0.3 + embedding_factor * 0.3)
+    avg_chunk_confidence * 0.4 + ocr_factor * 0.3 + embedding_factor * 0.3
+}
+
+/// Convertir un fichier temporaire en URL accessible pour affichage PDF
+#[tauri::command]
+pub async fn get_temp_pdf_url(
+    file_path: String,
+) -> Result<TempPdfUrlResponse, String> {
+    info!("🔗 Converting temp file to accessible URL: {}", file_path);
+    
+    let path = std::path::Path::new(&file_path);
+    
+    // Vérifier que le fichier existe
+    if !path.exists() {
+        return Err(format!("File not found: {}", file_path));
+    }
+    
+    // Pour l'instant, utiliser convertFileSrc concept de Tauri
+    // Note: Il faudra peut-être ajuster selon la config Tauri
+    let pdf_url = format!("file://{}", path.to_string_lossy());
+    
+    info!("✅ Generated PDF URL: {} → {}", file_path, pdf_url);
+    
+    Ok(TempPdfUrlResponse {
+        pdf_url,
+        original_path: file_path,
+    })
 }
 
 #[cfg(test)]

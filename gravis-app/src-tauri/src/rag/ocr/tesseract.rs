@@ -2,8 +2,9 @@
 // Phase 2: Implémentation robuste via Command::new("tesseract")
 
 use super::{
-    OcrResult, OcrMetadata, BoundingBox, 
-    PageSegMode, OcrEngineMode, PreprocessConfig, OcrError, Result
+    OcrResult, OcrMetadata, TesseractBoundingBox,
+    PageSegMode, OcrEngineMode, PreprocessConfig, OcrError, Result,
+    LayoutAnalyzer, BoundingBox as SemanticBoundingBox
 };
 use image::GenericImageView;
 use std::path::{Path, PathBuf};
@@ -196,7 +197,43 @@ impl TesseractProcessor {
         // Nettoyer les fichiers temporaires
         let _ = fs::remove_file(&output_txt).await;
         let _ = fs::remove_file(&output_tsv).await;
-        
+
+        // Perform layout analysis if we have bounding boxes
+        let ocr_blocks = if !bounding_boxes.is_empty() {
+            let image_dims = metadata.image_dimensions;
+
+            // Convert TesseractBoundingBox to format expected by LayoutAnalyzer
+            let boxes_with_text: Vec<(SemanticBoundingBox, String)> = bounding_boxes
+                .iter()
+                .map(|tbb| {
+                    let bbox = SemanticBoundingBox {
+                        x: tbb.x as f64,
+                        y: tbb.y as f64,
+                        width: tbb.width as f64,
+                        height: tbb.height as f64,
+                    };
+                    (bbox, tbb.text.clone())
+                })
+                .collect();
+
+            // Run layout analysis
+            let analyzer = LayoutAnalyzer::with_default_config();
+            let blocks = analyzer.analyze_layout_with_text(
+                &boxes_with_text,
+                (image_dims.0 as f64, image_dims.1 as f64),
+                1, // Single image/page = always page 1
+            );
+
+            if blocks.is_empty() {
+                None
+            } else {
+                debug!("🎯 Layout analysis detected {} semantic blocks", blocks.len());
+                Some(blocks)
+            }
+        } else {
+            None
+        };
+
         Ok(OcrResult {
             text,
             confidence,
@@ -206,11 +243,12 @@ impl TesseractProcessor {
             engine_used: "Tesseract Command".to_string(),
             tesseract_version: super::get_tesseract_version().await.unwrap_or("unknown".to_string()),
             metadata,
+            ocr_blocks,
         })
     }
     
     /// Parser les résultats TSV de Tesseract
-    async fn parse_tsv_output(&self, tsv_path: &Path) -> Result<Vec<BoundingBox>> {
+    async fn parse_tsv_output(&self, tsv_path: &Path) -> Result<Vec<TesseractBoundingBox>> {
         let content = fs::read_to_string(tsv_path).await?;
         let mut boxes = Vec::new();
         
@@ -232,7 +270,7 @@ impl TesseractProcessor {
             // Filtrer les éléments sans texte ou confiance trop faible
             if text.is_empty() || conf < 0.3 { continue; }
             
-            boxes.push(BoundingBox {
+            boxes.push(TesseractBoundingBox {
                 x: left,
                 y: top,
                 width,

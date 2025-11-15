@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import type { SourceSpan, OCRContent } from '@/components/OCRViewerWithSpans';
+// Types simplifiés sans composants OCR complexes
 
 interface DirectChatSession {
   session_id: string;
@@ -15,7 +15,6 @@ interface ProcessDocumentResponse {
     session_id: string;
     document_name: string;
     chunks: any[];
-    ocr_content: OCRContent;
   };
   processing_time_ms: number;
   chunks_created: number;
@@ -25,7 +24,6 @@ interface ProcessDocumentResponse {
 
 interface ChatResponse {
   response: string;
-  contributing_spans: SourceSpan[];
   confidence_score: number;
   session_id: string;
   search_time_ms: number;
@@ -45,8 +43,6 @@ export function useDirectChat() {
   const [_dragCounter, setDragCounter] = useState(0);
   const [droppedFile, setDroppedFile] = useState<File | null>(null);
   const [directChatSession, setDirectChatSession] = useState<DirectChatSession | null>(null);
-  const [ocrContent, setOcrContent] = useState<OCRContent | null>(null);
-  const [highlightedSpans, setHighlightedSpans] = useState<SourceSpan[]>([]);
   const [showOCRViewer, setShowOCRViewer] = useState(false);
 
   // Drag & Drop handlers - Use counter to handle nested elements correctly
@@ -105,7 +101,6 @@ export function useDirectChat() {
           session_id: response.session.session_id,
           document_name: response.session.document_name,
         });
-        setOcrContent(response.session.ocr_content);
 
         // Open OCR viewer window positioned next to main window
         try {
@@ -135,7 +130,6 @@ export function useDirectChat() {
   const chatWithDocument = async (userQuery: string): Promise<{
     success: boolean;
     content: string;
-    spans?: SourceSpan[];
   }> => {
     if (!directChatSession) {
       return { success: false, content: 'Aucune session active' };
@@ -151,21 +145,7 @@ export function useDirectChat() {
         }
       });
 
-      // Update highlighted spans in state
-      setHighlightedSpans(response.contributing_spans);
-
-      // Send highlights to OCR viewer window
-      try {
-        await invoke('update_ocr_viewer_highlights', {
-          spans: response.contributing_spans
-        });
-      } catch (error) {
-        console.warn('Failed to update OCR viewer highlights:', error);
-        // Fallback to inline panel if window doesn't exist
-        if (!showOCRViewer) {
-          setShowOCRViewer(true);
-        }
-      }
+      // Plus de spans highlighting - système simplifié
 
       // Format response with sources
       let responseContent = response.response;
@@ -181,8 +161,7 @@ export function useDirectChat() {
 
       return {
         success: true,
-        content: responseContent,
-        spans: response.contributing_spans
+        content: responseContent
       };
     } catch (error) {
       console.error('Erreur chat direct:', error);
@@ -204,8 +183,6 @@ export function useDirectChat() {
 
     setDroppedFile(null);
     setDirectChatSession(null);
-    setOcrContent(null);
-    setHighlightedSpans([]);
     setShowOCRViewer(false);
     setIsDragging(false);
     setDragCounter(0);
@@ -222,8 +199,6 @@ export function useDirectChat() {
 
     setDroppedFile(null);
     setDirectChatSession(null);
-    setOcrContent(null);
-    setHighlightedSpans([]);
     setShowOCRViewer(false);
     setIsDragging(false);
     setDragCounter(0);
@@ -234,8 +209,6 @@ export function useDirectChat() {
     isDragging,
     droppedFile,
     directChatSession,
-    ocrContent,
-    highlightedSpans,
     showOCRViewer,
 
     // Handlers

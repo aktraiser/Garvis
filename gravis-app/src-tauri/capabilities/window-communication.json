@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "window-communication",
   "description": "Capabilities for inter-window communication",
-  "windows": ["main", "model_selector", "settings", "rag"],
+  "windows": ["main", "model_selector", "settings", "rag", "ocr_viewer"],
   "permissions": [
     "core:event:allow-emit",
     "core:event:allow-listen",

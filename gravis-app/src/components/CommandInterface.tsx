@@ -265,6 +265,28 @@ export function CommandInterface() {
     };
   }, [currentModel]); // Include currentModel in dependencies to fix stale closure
 
+  // Écouter les questions automatiques depuis la fenêtre OCR
+  useEffect(() => {
+    console.log('🎯 Setting up auto_question_from_ocr listener');
+    
+    const unsubscribeAutoQuestion = listen('auto_question_from_ocr', (event: any) => {
+      console.log('📥 Received auto question from OCR:', event.payload);
+      const { question, selected_text, action, session_id, document_name } = event.payload;
+      
+      // Injecter automatiquement la question dans l'input de chat
+      setQuery(question);
+      
+      console.log(`✅ Auto-filled chat input with ${action} question: "${question}"`);
+      console.log(`📝 Based on selected text from ${document_name}: "${selected_text}"`);
+    });
+
+    return () => {
+      if (unsubscribeAutoQuestion) {
+        unsubscribeAutoQuestion.then(fn => fn());
+      }
+    };
+  }, []);
+
   const handleVoiceInput = () => {
     setIsListening(!isListening);
     // TODO: Implement voice input
@@ -1451,17 +1473,24 @@ Question à propos de ce contenu : `;
         />
       )}
 
-      {/* OCR Viewer Panel - Split panel for direct chat */}
-      {directChat.showOCRViewer && directChat.ocrContent && directChat.directChatSession && (
+      {/* PDF Viewer Panel - Split panel for direct chat */}
+      {directChat.showOCRViewer && directChat.directChatSession && (
         <OCRPanel
-          documentName={directChat.directChatSession.document_name}
-          ocrContent={directChat.ocrContent}
-          highlightedSpans={directChat.highlightedSpans}
-          onSpanClick={(span) => {
-            console.log('Span clicked:', span);
-          }}
-          onTextSelection={(text) => {
-            console.log('Text selected:', text);
+          sessionId={directChat.directChatSession.session_id}
+          onTextAction={async (action, text) => {
+            console.log(`🎯 ${action} requested for text:`, text);
+            
+            // Construire la question
+            const question = action === 'explain' 
+              ? `Explique ce passage : "${text}"` 
+              : `Résume ce passage : "${text}"`;
+            
+            // Envoyer au système RAG
+            const result = await directChat.chatWithDocument(question);
+            if (result.success) {
+              // Afficher la réponse dans la console pour l'instant
+              console.log('✅ Réponse:', result.content);
+            }
           }}
         />
       )}
