@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main", "rag", "settings", "model-selector", "conversations"],
+  "windows": ["main", "rag", "settings", "model-selector", "conversations", "ocr_viewer"],
   "permissions": [
     "core:default",
     "opener:default",

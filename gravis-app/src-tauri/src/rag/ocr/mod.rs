@@ -16,7 +16,6 @@ pub mod layout_analyzer;
 // === Alternatives PDF (pures Rust et sans dépendances externes) ===
 pub mod pdf_lopdf;          // Alternative #1: lopdf (Pure Rust, recommandé)
 pub mod pdf_extract_simple; // Alternative #2: pdf-extract (Simple)
-pub mod pdf_poppler_utils;  // Alternative #3: poppler-utils via Command
 
 // Phase 2 exports
 pub use tesseract::{TesseractProcessor, TesseractConfig};
@@ -29,7 +28,6 @@ pub use types::{BoundingBox, OCRBlock, BlockType, BoundingBoxExt};
 // === Exports des alternatives PDF ===
 pub use pdf_lopdf::{LopdFProcessor, LopdFPipelineConfig, LopdFPageResult};
 pub use pdf_extract_simple::{SimplePdfExtractor, PdfExtractConfig, SimpleExtractionResult, quick_extract_text};
-pub use pdf_poppler_utils::{PopplerUtilsProcessor, PopplerUtilsConfig, PopplerExtractionResult, quick_poppler_extract};
 
 /// Configuration OCR simplifiée pour Command-based approach
 #[derive(Debug, Clone, Serialize, Deserialize)]

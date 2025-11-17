@@ -109,15 +109,7 @@ export const DirectChatPage: React.FC = () => {
       if (response.session) {
         setSessionId(response.session.session_id);
         setDocumentName(response.session.document_name);
-
-        const welcomeMessage: Message = {
-          id: Date.now().toString(),
-          type: 'system',
-          content: `📄 **${response.session.document_name}** traité avec succès !\n\n${response.chunks_created} sections analysées (${response.embedded_chunks} avec embeddings).\nConfiance: ${Math.round(response.confidence_score * 100)}%\nTemps: ${response.processing_time_ms}ms`,
-          timestamp: new Date(),
-        };
-
-        setMessages([welcomeMessage]);
+        setMessages([]);
       }
     } catch (error) {
       console.error('Erreur traitement:', error);
@@ -202,7 +194,9 @@ export const DirectChatPage: React.FC = () => {
   };
 
   // Handle text selection dans SimplePdfViewer
-  const handleTextAction = async (action: 'explain' | 'summarize', text: string) => {
+  const handleTextAction = React.useCallback(async (action: 'explain' | 'summarize', text: string) => {
+    if (!sessionId) return;
+    
     try {
       console.log(`🎯 ${action} requested for text:`, text);
       
@@ -246,10 +240,25 @@ export const DirectChatPage: React.FC = () => {
 
     } catch (error) {
       console.error('Error in text action:', error);
+      const errorMessage: Message = {
+        id: (Date.now() + 2).toString(),
+        type: 'system',
+        content: `❌ Erreur: ${error}`,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsProcessing(false);
     }
-  };
+  }, [sessionId]);
+
+  // Ref stable pour éviter les re-renders du SimplePdfViewer
+  const handleTextActionRef = React.useRef(handleTextAction);
+  handleTextActionRef.current = handleTextAction;
+
+  const stableHandleTextAction = React.useCallback((action: 'explain' | 'summarize', text: string) => {
+    return handleTextActionRef.current(action, text);
+  }, []);
 
   return (
     <div
@@ -303,15 +312,6 @@ export const DirectChatPage: React.FC = () => {
                   </div>
                 </div>
               ))}
-              {isProcessing && (
-                <div className="message message-assistant">
-                  <div className="message-loading">
-                    <div className="loading-dots">
-                      <span>.</span><span>.</span><span>.</span>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
 
             <form className="chat-input-container" onSubmit={handleSubmit}>
@@ -353,20 +353,11 @@ export const DirectChatPage: React.FC = () => {
 
           {/* Right panel - PDF Viewer */}
           {sessionId && (
-            <div style={{
-              position: 'fixed',
-              right: 0,
-              top: 0,
-              bottom: 0,
-              width: '50%',
-              backgroundColor: '#1f2937',
-              borderLeft: '1px solid #374151',
-              zIndex: 999,
-              overflow: 'hidden',
-            }}>
+            <div className="pdf-viewer-panel">
               <SimplePdfViewer
+                key={sessionId} 
                 sessionId={sessionId}
-                onTextAction={handleTextAction}
+                onTextAction={stableHandleTextAction}
               />
             </div>
           )}

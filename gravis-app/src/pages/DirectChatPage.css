@@ -397,6 +397,19 @@
   transform: none;
 }
 
+/* PDF Viewer Panel */
+.pdf-viewer-panel {
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  background-color: #1f2937;
+  border-left: 1px solid #374151;
+  z-index: 999;
+  overflow: hidden;
+}
+
 /* Responsive */
 @media (max-width: 1024px) {
   .chat-panel {

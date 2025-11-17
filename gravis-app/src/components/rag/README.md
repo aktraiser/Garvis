@@ -1,4 +1,4 @@
-# RAG Window Components
+n# RAG Window Components
 
 Ce dossier contient les composants refactorisés pour la fenêtre RAG, organisés de manière modulaire et maintenable.
 
