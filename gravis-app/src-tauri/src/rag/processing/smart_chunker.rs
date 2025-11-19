@@ -5,7 +5,7 @@ use regex::Regex;
 use anyhow::Result;
 use tracing::{debug, info};
 
-use crate::rag::{EnrichedChunk, ChunkType, ChunkMetadata, SourceType, ExtractionMethod, Priority, LigatureCleaner};
+use crate::rag::{EnrichedChunk, ChunkType, ChunkMetadata, SourceType, ExtractionMethod, Priority, ChunkSource, LigatureCleaner};
 
 /// Configuration pour le chunking intelligent
 #[derive(Debug, Clone)]
@@ -573,6 +573,8 @@ impl SmartChunker {
             },
             group_id: group_id.to_string(),
             source_spans: None,
+        chunk_source: ChunkSource::BodyText,
+        figure_id: None,
         };
 
         chunk.generate_hash();

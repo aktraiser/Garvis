@@ -2,7 +2,7 @@
 // Chunker intelligent qui génère des source spans pour explainability
 
 use crate::rag::{
-    EnrichedChunk, ChunkType, ChunkMetadata, SourceType, ExtractionMethod,
+    EnrichedChunk, ChunkType, ChunkMetadata, SourceType, ExtractionMethod, ChunkSource,
     SourceSpan, SourceSpanManager, SourceBoundingBox as BoundingBox
 };
 use serde::{Deserialize, Serialize};
@@ -300,6 +300,8 @@ impl SpanAwareChunker {
             },
             group_id: group_id.to_string(),
             source_spans: Some(span_ids),
+            chunk_source: ChunkSource::BodyText,
+            figure_id: None,
         }
     }
     

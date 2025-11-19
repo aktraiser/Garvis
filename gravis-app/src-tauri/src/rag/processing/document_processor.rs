@@ -9,7 +9,7 @@ use tracing::{info, warn, debug};
 use crate::rag::{
     GroupDocument, DocumentType, PdfStrategy, EnrichedChunk, ChunkType, ChunkMetadata,
     SourceType, ExtractionMethod, Priority, ChunkConfig, RagResult, RagError,
-    sanitize_pdf_text
+    ChunkSource, sanitize_pdf_text
 };
 use crate::rag::ocr::{
     TesseractProcessor, OcrMetadata, PreprocessConfig, 
@@ -118,6 +118,8 @@ impl DocumentProcessor {
                 },
                 group_id: group_id.to_string(),
                 source_spans: None,
+            chunk_source: ChunkSource::BodyText,
+            figure_id: None,
             };
             
             chunks.push(fallback_chunk);
@@ -189,6 +191,8 @@ impl DocumentProcessor {
                 },
                 group_id: group_id.to_string(),
                 source_spans: None,
+            chunk_source: ChunkSource::BodyText,
+            figure_id: None,
             };
             chunks.push(emergency_chunk);
         }
@@ -729,6 +733,8 @@ impl DocumentProcessor {
             },
             group_id: group_id.to_string(),
             source_spans: None,
+        chunk_source: ChunkSource::BodyText,
+        figure_id: None,
         };
 
         chunk.generate_hash();
@@ -764,6 +770,8 @@ impl DocumentProcessor {
             },
             group_id: group_id.to_string(),
             source_spans: None,
+        chunk_source: ChunkSource::BodyText,
+        figure_id: None,
         };
 
         chunk.generate_hash();
@@ -830,6 +838,8 @@ fn simple_text_split(content: &str, chunk_config: &ChunkConfig) -> Vec<EnrichedC
                 },
                 group_id: "split".to_string(),
                 source_spans: None,
+            chunk_source: ChunkSource::BodyText,
+            figure_id: None,
             };
             chunks.push(chunk);
             
@@ -877,6 +887,8 @@ fn simple_text_split(content: &str, chunk_config: &ChunkConfig) -> Vec<EnrichedC
             },
             group_id: "split".to_string(),
             source_spans: None,
+        chunk_source: ChunkSource::BodyText,
+        figure_id: None,
         };
         chunks.push(chunk);
     }
@@ -973,6 +985,8 @@ fn create_fallback_chunk(content: &str, index: usize) -> EnrichedChunk {
         },
         group_id: "fallback".to_string(),
         source_spans: None,
+    chunk_source: ChunkSource::BodyText,
+    figure_id: None,
     }
 }
 

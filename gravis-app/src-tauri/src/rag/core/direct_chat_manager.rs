@@ -10,7 +10,7 @@ use uuid::Uuid;
 use super::direct_chat::{
     DirectChatSession, DirectChatError, DirectChatResult, SelectionContext
 };
-use crate::rag::{EnrichedChunk, CustomE5Embedder};
+use crate::rag::{EnrichedChunk, CustomE5Embedder, EnhancedBM25Encoder, ScoringEngine};
 
 /// Gestionnaire de sessions temporaires
 #[derive(Clone)]
@@ -135,7 +135,7 @@ impl DirectChatManager {
         cleaned_count
     }
 
-    /// Recherche sémantique dans les chunks d'une session
+    /// Recherche hybride avec normalisation et poids adaptatifs par intent
     pub async fn search_in_session(
         &self,
         session_id: &str,
@@ -144,7 +144,7 @@ impl DirectChatManager {
         limit: Option<usize>,
     ) -> DirectChatResult<Vec<ScoredChunk>> {
         let session = self.get_session(session_id).await?;
-        
+
         // Générer embedding de la requête
         let query_embedding = self.embedder
             .encode(&query)
@@ -158,25 +158,95 @@ impl DirectChatManager {
             session.chunks.clone()
         };
 
-        debug!("Searching in {} chunks for session {}", 
+        debug!("🔍 Hybrid search in {} chunks for session {}",
                chunks_to_search.len(), session_id);
 
-        // Calculer similarités cosinus
-        let mut scored_chunks = Vec::new();
-        
-        for chunk in chunks_to_search {
-            if let Some(ref chunk_embedding) = chunk.embedding {
-                let similarity = cosine_similarity(&query_embedding, chunk_embedding);
-                
-                scored_chunks.push(ScoredChunk {
-                    chunk,
-                    score: similarity,
-                });
-            }
+        // === SCORING ENGINE: Normalisation + Intent Detection + IDF ===
+
+        // 1. Initialiser BM25 encoder
+        let mut bm25_encoder = EnhancedBM25Encoder::new();
+
+        // Préparer documents pour BM25
+        let bm25_docs: Vec<(String, String)> = chunks_to_search
+            .iter()
+            .map(|chunk| (chunk.id.clone(), chunk.content.clone()))
+            .collect();
+
+        bm25_encoder.index_documents(&bm25_docs);
+
+        // 2. Initialiser Scoring Engine avec IDF
+        let mut scoring_engine = ScoringEngine::new();
+        scoring_engine.build_idf_map(&bm25_docs);
+
+        // 3. Détecter l'intent de la requête
+        let query_intent = scoring_engine.detect_intent(query);
+
+        info!("🎯 Query: '{}' | Intent: {:?}", query, query_intent);
+
+        // 4. Calculer tous les scores bruts
+        let mut dense_scores = Vec::new();
+        let mut sparse_scores = Vec::new();
+        let mut keyword_boosts = Vec::new();
+
+        for chunk in &chunks_to_search {
+            // Score dense (embeddings sémantiques)
+            let dense_score = if let Some(ref chunk_embedding) = chunk.embedding {
+                cosine_similarity(&query_embedding, chunk_embedding)
+            } else {
+                0.0
+            };
+
+            // Score sparse (BM25 lexical)
+            let sparse_score = bm25_encoder.score(query, &chunk.id);
+
+            // Keyword boost de base
+            let base_boost = bm25_encoder.keyword_boost(query, &chunk.content);
+
+            // Boost additionnel pour termes techniques détectés dynamiquement via IDF
+            let keyword_boost = scoring_engine.apply_dynamic_technical_boost(
+                query,
+                &chunk.content,
+                base_boost
+            );
+
+            dense_scores.push(dense_score);
+            sparse_scores.push(sparse_score);
+            keyword_boosts.push(keyword_boost);
         }
 
-        // Trier par score décroissant
+        // 5. Calculer scores hybrides normalisés avec poids adaptatifs
+        let hybrid_scores = scoring_engine.compute_hybrid_scores(
+            &dense_scores,
+            &sparse_scores,
+            &keyword_boosts,
+            &query_intent
+        );
+
+        // 6. Créer les scored chunks
+        let mut scored_chunks: Vec<ScoredChunk> = chunks_to_search
+            .into_iter()
+            .enumerate()
+            .map(|(i, chunk)| {
+                debug!("🎯 Chunk {}: dense={:.3}, sparse={:.3}, boost={:.3}, hybrid={:.3}",
+                       &chunk.id[..12.min(chunk.id.len())],
+                       dense_scores[i], sparse_scores[i], keyword_boosts[i], hybrid_scores[i]);
+
+                ScoredChunk {
+                    chunk,
+                    score: hybrid_scores[i],
+                }
+            })
+            .collect();
+
+        // Trier par score hybride décroissant
         scored_chunks.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Log top chunks pour debug
+        if !scored_chunks.is_empty() {
+            info!("🏆 Top chunk: score={:.3}, preview: {}",
+                  scored_chunks[0].score,
+                  scored_chunks[0].chunk.content.chars().take(80).collect::<String>());
+        }
 
         // Limiter résultats
         let limit = limit.unwrap_or(10);

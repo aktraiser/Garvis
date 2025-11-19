@@ -23,7 +23,10 @@ pub mod commands;
 pub mod direct_chat_commands;
 
 // Phase 4 exports - Production ready
-pub use search::{CustomE5Config, CustomE5Embedder};
+pub use search::{
+    CustomE5Config, CustomE5Embedder, EnhancedBM25Encoder,
+    ScoringEngine, SearchIntent, IntentWeights
+};
 pub use core::{
     QdrantRestClient, QdrantRestConfig, RestPoint, RestSearchResponse
 };
@@ -208,6 +211,9 @@ pub struct EnrichedChunk {
     pub group_id: String,
     // Phase 4A: Source Spans & Explainability
     pub source_spans: Option<Vec<String>>, // Références aux span IDs
+    // Phase 3: Vision-Aware RAG
+    pub chunk_source: ChunkSource, // D'où vient ce chunk (body, figure, table...)
+    pub figure_id: Option<String>, // ID de la figure si applicable (ex: "Figure 3", "Table 1")
 }
 
 /// Type de chunk
@@ -218,6 +224,21 @@ pub enum ChunkType {
     Module,
     TextBlock,
     Comment,
+}
+
+/// Source du chunk - Vision-Aware RAG Phase 3
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ChunkSource {
+    /// Texte du corps principal du document
+    BodyText,
+    /// Légende de figure (ex: "Figure 3: Compression ratio")
+    FigureCaption,
+    /// Texte OCR extrait de la zone d'une figure/graphique
+    FigureRegionText,
+    /// Texte extrait d'un tableau
+    Table,
+    /// En-tête de section
+    SectionHeader,
 }
 
 /// Type de source pour l'extraction - Phase 1 OCR
