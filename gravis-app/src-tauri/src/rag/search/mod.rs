@@ -4,9 +4,11 @@ pub mod mmr_reranker;
 pub mod custom_e5;
 pub mod enhanced_bm25;
 pub mod scoring_engine;
+pub mod numerical_reranker;
 
 pub use search_optimizer::*;
 pub use mmr_reranker::*;
 pub use custom_e5::*;
 pub use enhanced_bm25::*;
 pub use scoring_engine::*;
+pub use numerical_reranker::*;

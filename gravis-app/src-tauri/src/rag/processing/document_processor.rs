@@ -11,6 +11,7 @@ use crate::rag::{
     SourceType, ExtractionMethod, Priority, ChunkConfig, RagResult, RagError,
     ChunkSource, sanitize_pdf_text
 };
+use crate::rag::processing::FigureChunkBuilder;
 use crate::rag::ocr::{
     TesseractProcessor, OcrMetadata, PreprocessConfig, 
     detect_file_format, FileFormat,
@@ -196,6 +197,68 @@ impl DocumentProcessor {
             };
             chunks.push(emergency_chunk);
         }
+
+        // 🆕 PHASE 3: Vision-Aware RAG - Traiter les figures et graphiques
+        if matches!(document_type, DocumentType::PDF { .. }) {
+            debug!("Processing figures for PDF document");
+
+            // Stratégie v1 simple: on re-extrait le PDF page par page pour détecter les figures
+            // TODO v2: optimiser en stockant les pages lors de l'extraction initiale
+            match self.extract_pdf_pages_for_figures(file_path).await {
+                Ok(pages) if !pages.is_empty() => {
+                    // Créer le builder avec OCR activé
+                    let figure_builder_opt = match FigureChunkBuilder::with_ocr().await {
+                        Ok(builder) => Some(builder),
+                        Err(err) => {
+                            // Log and drop error immediately
+                            warn!("Failed to initialize figure OCR: {}. Falling back to caption-only mode", err);
+                            None
+                        }
+                    };
+
+                    // Now we can safely await without holding the error
+                    let figure_chunks_result = if let Some(builder) = figure_builder_opt {
+                        builder.build_all_figure_chunks(pages.clone(), group_id).await
+                    } else {
+                        let fallback_builder = FigureChunkBuilder::new();
+                        fallback_builder.build_all_figure_chunks(pages, group_id).await
+                    };
+
+                    match figure_chunks_result {
+                        Ok(figure_chunks) if !figure_chunks.is_empty() => {
+                            info!("✅ Generated {} figure chunks", figure_chunks.len());
+                            chunks.extend(figure_chunks);
+                        }
+                        Ok(_) => {
+                            debug!("No figures detected in document");
+                        }
+                        Err(err) => {
+                            warn!("Failed to build figure chunks: {}", err);
+                        }
+                    }
+                }
+                Ok(_) => {
+                    debug!("No pages extracted for figure processing");
+                }
+                Err(_) => {
+                    warn!("Failed to extract PDF pages for figure processing");
+                }
+            }
+        }
+
+        // 📊 DEBUG: Log chunks breakdown by source type
+        let mut by_source: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for chunk in &chunks {
+            let source_name = match &chunk.chunk_source {
+                ChunkSource::BodyText => "BodyText",
+                ChunkSource::FigureCaption => "FigureCaption",
+                ChunkSource::FigureRegionText => "FigureRegionText",
+                ChunkSource::Table => "Table",
+                ChunkSource::SectionHeader => "SectionHeader",
+            };
+            *by_source.entry(source_name.to_string()).or_insert(0) += 1;
+        }
+        info!("📊 Chunks générés par source: {:?}", by_source);
 
         // 5. Construction du document enrichi
         let document_id = format!("doc_{}", uuid::Uuid::new_v4().simple());
@@ -498,6 +561,42 @@ impl DocumentProcessor {
             ExtractionMethod::PdfOcrFallback => SourceType::HybridPdfOcr,
             ExtractionMethod::HybridIntelligent => SourceType::HybridPdfOcr,
         }
+    }
+
+    /// Extraire les pages d'un PDF pour le traitement des figures (Phase 3 Vision-Aware)
+    ///
+    /// Retourne: Vec<(page_index, page_text, optional_image_path)>
+    async fn extract_pdf_pages_for_figures(
+        &self,
+        path: &Path,
+    ) -> Result<Vec<(u32, String, Option<std::path::PathBuf>)>> {
+        debug!("Extracting PDF pages for figure detection: {:?}", path);
+
+        let config = PdfExtractConfig::default();
+        let extractor = SimplePdfExtractor::new(config);
+
+        // Extract PDF with page-by-page text
+        let result = extractor.extract_pdf_text(path).await
+            .map_err(|e| anyhow::anyhow!("PDF page extraction failed: {}", e))?;
+
+        // Pour v1, on utilise le texte complet et on simule une structure de pages
+        // basée sur des heuristiques (sauts de page, etc.)
+        // TODO v2: modifier SimplePdfExtractor pour retourner Vec<PageText>
+
+        let mut pages = Vec::new();
+
+        // Heuristique simple: diviser le texte en pages si possible
+        // Sinon, traiter comme une seule page
+        let page_texts = split_text_into_pages(&result.text);
+
+        for (idx, page_text) in page_texts.iter().enumerate() {
+            // Pour v1: pas de rendu d'image (OCR désactivé par défaut car coûteux)
+            // TODO v2: ajouter option de rendu PDF → image pour OCR
+            pages.push((idx as u32, page_text.clone(), None));
+        }
+
+        debug!("Extracted {} page(s) for figure detection", pages.len());
+        Ok(pages)
     }
 
     /// Chunking adaptatif selon le type de contenu - Phase 2 amélioré
@@ -988,6 +1087,68 @@ fn create_fallback_chunk(content: &str, index: usize) -> EnrichedChunk {
     chunk_source: ChunkSource::BodyText,
     figure_id: None,
     }
+}
+
+/// Helper: diviser le texte en pages basé sur des heuristiques
+///
+/// Stratégie v1 simple:
+/// - Cherche des séparateurs de page (form feed, multiples line breaks)
+/// - Si pas trouvé, traite comme une seule page
+fn split_text_into_pages(text: &str) -> Vec<String> {
+    // Heuristique 1: Form feed characters (\x0C)
+    if text.contains('\x0C') {
+        let pages: Vec<String> = text
+            .split('\x0C')
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.to_string())
+            .collect();
+
+        if !pages.is_empty() {
+            return pages;
+        }
+    }
+
+    // Heuristique 2: Séquences de multiples line breaks (≥3)
+    let page_break_pattern = regex::Regex::new(r"\n\s*\n\s*\n").unwrap();
+    let potential_pages: Vec<String> = page_break_pattern
+        .split(text)
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.to_string())
+        .collect();
+
+    // Si on obtient un nombre raisonnable de pages (entre 2 et 100), utiliser cette division
+    if potential_pages.len() >= 2 && potential_pages.len() <= 100 {
+        return potential_pages;
+    }
+
+    // Heuristique 3: Si texte très long (>10000 chars), diviser par taille
+    if text.len() > 10000 {
+        let mut pages = Vec::new();
+        let target_page_size = 4000; // ~4000 chars par page
+        let mut current_pos = 0;
+
+        while current_pos < text.len() {
+            let end_pos = (current_pos + target_page_size).min(text.len());
+
+            // Essayer de couper à un saut de ligne proche
+            let slice = &text[current_pos..end_pos];
+            if let Some(last_newline) = slice.rfind('\n') {
+                let actual_end = current_pos + last_newline + 1;
+                pages.push(text[current_pos..actual_end].to_string());
+                current_pos = actual_end;
+            } else {
+                pages.push(text[current_pos..end_pos].to_string());
+                current_pos = end_pos;
+            }
+        }
+
+        if !pages.is_empty() {
+            return pages;
+        }
+    }
+
+    // Fallback: traiter comme une seule page
+    vec![text.to_string()]
 }
 
 #[cfg(test)]

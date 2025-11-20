@@ -10,7 +10,10 @@ use uuid::Uuid;
 use super::direct_chat::{
     DirectChatSession, DirectChatError, DirectChatResult, SelectionContext
 };
-use crate::rag::{EnrichedChunk, CustomE5Embedder, EnhancedBM25Encoder, ScoringEngine};
+use crate::rag::{
+    EnrichedChunk, CustomE5Embedder, EnhancedBM25Encoder, ScoringEngine,
+    QueryKindDetector, NumericalReranker, QueryKind,
+};
 
 /// Gestionnaire de sessions temporaires
 #[derive(Clone)]
@@ -178,10 +181,14 @@ impl DirectChatManager {
         let mut scoring_engine = ScoringEngine::new();
         scoring_engine.build_idf_map(&bm25_docs);
 
-        // 3. Détecter l'intent de la requête
+        // 3. Détecter l'intent de la requête (ExactPhrase/Conceptual/Mixed)
         let query_intent = scoring_engine.detect_intent(query);
 
-        info!("🎯 Query: '{}' | Intent: {:?}", query, query_intent);
+        // 4. Détecter le QueryKind (TextAtomic/TextCombined/DigitAtomic/DigitCombined)
+        let query_kind_detector = QueryKindDetector::new();
+        let query_kind = query_kind_detector.detect_query_kind(query);
+
+        info!("🎯 Query: '{}' | Intent: {:?} | Kind: {:?}", query, query_intent, query_kind);
 
         // 4. Calculer tous les scores bruts
         let mut dense_scores = Vec::new();
@@ -241,11 +248,89 @@ impl DirectChatManager {
         // Trier par score hybride décroissant
         scored_chunks.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Log top chunks pour debug
-        if !scored_chunks.is_empty() {
-            info!("🏆 Top chunk: score={:.3}, preview: {}",
-                  scored_chunks[0].score,
-                  scored_chunks[0].chunk.content.chars().take(80).collect::<String>());
+        // === FILTRAGE BIBLIOGRAPHIE ===
+        // Détecter et pénaliser fortement les chunks de références/bibliographie
+        for sc in &mut scored_chunks {
+            if Self::is_bibliography_chunk(&sc.chunk.content) {
+                sc.score *= 0.1; // Pénalité massive (90% de réduction)
+                debug!("📚 Bibliography chunk detected, score reduced: {}", &sc.chunk.id[..12.min(sc.chunk.id.len())]);
+            }
+        }
+
+        // Re-trier après filtrage bibliographie
+        scored_chunks.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+
+        // === RERANKING NUMÉRIQUE pour DigitAtomic et DigitCombined ===
+
+        if matches!(query_kind, QueryKind::DigitAtomic | QueryKind::DigitCombined) {
+            info!("🔢 Applying numerical reranking for {:?}", query_kind);
+
+            let numerical_reranker = NumericalReranker::new();
+
+            // Préparer données pour reranker
+            let chunks_for_rerank: Vec<(String, f32)> = scored_chunks
+                .iter()
+                .map(|sc| (sc.chunk.id.clone(), sc.score))
+                .collect();
+
+            let mut chunk_contents = std::collections::HashMap::new();
+            for sc in &scored_chunks {
+                chunk_contents.insert(sc.chunk.id.clone(), sc.chunk.content.clone());
+            }
+
+            // Appliquer reranking selon le type (returns Vec<(id, score, has_match)>)
+            let reranked: Vec<(String, f32, bool)> = match query_kind {
+                QueryKind::DigitAtomic => {
+                    numerical_reranker.rerank_digit_atomic(query, chunks_for_rerank, &chunk_contents)
+                }
+                QueryKind::DigitCombined => {
+                    numerical_reranker.rerank_digit_combined(query, chunks_for_rerank, &chunk_contents)
+                }
+                _ => chunks_for_rerank.into_iter().map(|(id, score)| (id, score, false)).collect(),
+            };
+
+            // Reconstruire scored_chunks avec nouveaux scores ET match flags
+            let chunk_id_to_data: std::collections::HashMap<String, (f32, bool)> =
+                reranked.into_iter().map(|(id, score, has_match)| (id, (score, has_match))).collect();
+
+            // Créer un type étendu pour stocker temporairement le flag has_match
+            let mut scored_with_match: Vec<(ScoredChunk, bool)> = scored_chunks
+                .into_iter()
+                .map(|sc| {
+                    let has_match = chunk_id_to_data.get(&sc.chunk.id).map(|(_, m)| *m).unwrap_or(false);
+                    (sc, has_match)
+                })
+                .collect();
+
+            // HARD PRIORITY SORT: has_match FIRST, then score
+            scored_with_match.sort_by(|a, b| {
+                b.1.cmp(&a.1)  // PRIMARY: Boolean match (true > false)
+                    .then(b.0.score.partial_cmp(&a.0.score).unwrap_or(std::cmp::Ordering::Equal))  // SECONDARY: Score
+            });
+
+            info!("🔢 Numerical reranking complete with hard priority sorting");
+
+            // Log Top-5 avec match flags pour debugging
+            info!("📊 TOP-5 AFTER NUMERICAL RERANKING:");
+            for (i, (sc, has_match)) in scored_with_match.iter().take(5).enumerate() {
+                let preview = sc.chunk.content.chars().take(60).collect::<String>();
+                info!("  {}. match={} | score={:.3} | {}",
+                    i + 1,
+                    if *has_match { "✅" } else { "❌" },
+                    sc.score,
+                    preview
+                );
+            }
+
+            // Extract back to scored_chunks (without the match flag)
+            scored_chunks = scored_with_match.into_iter().map(|(sc, _)| sc).collect();
+        } else {
+            // Log top chunks pour debug (non-numerical queries)
+            if !scored_chunks.is_empty() {
+                info!("🏆 Top chunk: score={:.3}, preview: {}",
+                      scored_chunks[0].score,
+                      scored_chunks[0].chunk.content.chars().take(80).collect::<String>());
+            }
         }
 
         // Limiter résultats
@@ -290,6 +375,54 @@ impl DirectChatManager {
             // Pas de filtrage
             (None, None) => Ok(chunks.to_vec()),
         }
+    }
+
+    /// Détecter si un chunk est une bibliographie/références
+    fn is_bibliography_chunk(content: &str) -> bool {
+        let content_lower = content.to_lowercase();
+
+        // Patterns typiques de bibliographie
+        let bib_patterns = [
+            "et al.",
+            "arxiv",
+            "preprint",
+            "doi:",
+            "http://",
+            "https://",
+            "[1]", "[2]", "[3]", "[4]", "[5]", // Numérotation de références
+        ];
+
+        // Compter combien de patterns correspondent
+        let pattern_matches = bib_patterns.iter()
+            .filter(|pattern| content_lower.contains(*pattern))
+            .count();
+
+        // Heuristique: Si au moins 2 patterns, c'est probablement une biblio
+        // OU si le contenu contient beaucoup de noms avec initiales (A. B., C. D., etc.)
+        if pattern_matches >= 2 {
+            return true;
+        }
+
+        // Détecter patterns de noms d'auteurs (ex: "Kirillov, E. Mintun, N. Ravi, H. Mao")
+        let author_pattern = regex::Regex::new(r"[A-Z]\.\s+[A-Z]").unwrap();
+        let author_matches = author_pattern.find_iter(content).count();
+
+        // Si beaucoup d'initiales (typique d'une liste d'auteurs)
+        if author_matches >= 3 {
+            return true;
+        }
+
+        // Détecter si le chunk est essentiellement une liste de références
+        // (beaucoup de virgules + noms propres)
+        let comma_count = content.matches(',').count();
+        let word_count = content.split_whitespace().count();
+
+        if word_count > 20 && comma_count > word_count / 4 {
+            // Beaucoup de virgules = probablement liste d'auteurs
+            return true;
+        }
+
+        false
     }
 
     /// Obtenir statistiques des sessions actives

@@ -25,7 +25,9 @@ pub mod direct_chat_commands;
 // Phase 4 exports - Production ready
 pub use search::{
     CustomE5Config, CustomE5Embedder, EnhancedBM25Encoder,
-    ScoringEngine, SearchIntent, IntentWeights
+    ScoringEngine, SearchIntent, IntentWeights,
+    // Phase 3: Digit-Aware RAG
+    QueryKindDetector, NumericalReranker, QueryKind, NumericalConstraint,
 };
 pub use core::{
     QdrantRestClient, QdrantRestConfig, RestPoint, RestSearchResponse
