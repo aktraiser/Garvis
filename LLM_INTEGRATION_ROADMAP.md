@@ -61,9 +61,9 @@
 
 ### 🎯 Ordre d'Implémentation Recommandé
 
-**Sprint 1 : Niveau 1 UNIQUEMENT** (1-2 jours)
+** (1-2 jours)
 - Focus : `llm_answer_with_context()` avec troncature
-- Objectif : Réponses synthétisées au lieu de chunks bruts
+- Objectif : Réponses synthétisées au lieu de chunks brutsSprint 1 : Niveau 1 UNIQUEMENT**
 - Impact : **Massif** - expérience utilisateur transformée
 
 **Sprint 2 : Niveau 2** (1 jour)
@@ -981,26 +981,141 @@ async fn test_ab_with_vs_without_llm() {
 
 ## 📋 Ordre de Priorité d'Implémentation
 
-### Sprint 1 : Niveau 1 (LLM Synthesis) - CRITIQUE
+### Sprint 1 : Niveau 1 (LLM Synthesis) - ✅ IMPLÉMENTÉ + ⚠️ AUDIT CRITIQUE (22 Nov 2024)
 
-**Objectif** : Réponses structurées au lieu de chunks bruts
+**Objectif Original** : Réponses structurées au lieu de chunks bruts
 
-**Tasks** :
-1. ✅ Créer structs `LlmChatResponse`, `SourceRef`, `LlmResponseMetadata`
-2. ✅ Impl `build_context_string()` avec formatting par source type
-3. ✅ Impl `llm_answer_with_context()` avec prompt template
-4. 🏗️ **Créer module `crate::llm`** et client HTTP
-5. ✅ Gestion erreurs LLM (timeout, retry logic)
-5. ✅ Logging structuré
-6. ✅ Tests unitaires
-7. ✅ Tests avec queries réelles
-8. ✅ Métriques (latency, tokens)
+#### ✅ Ce qui a été implémenté (Niveau 1 - conforme roadmap)
 
-**Validation** :
-- [ ] User teste avec 10 queries variées
-- [ ] Réponses > 80% pertinence subjective
-- [ ] Latency < 2s (RAG + LLM)
-- [ ] Sources correctement citées
+**Tasks Niveau 1** :
+1. ✅ Créer structs `LlmContextResponse`, `LlmChunkInfo` (Rust)
+2. ✅ Impl `build_llm_context()` avec formatting par source type + troncature 800 chars
+3. ✅ Impl commande Tauri `chat_with_llm_context`
+4. ✅ Wrapper frontend `chatWithLlmSynthesis()` avec prompt template
+5. ✅ Gestion erreurs LLM (try/catch + logs)
+6. ✅ Logging structuré (Rust + TS)
+7. ✅ Détection OCR automatique + warning
+8. ✅ Métriques (search_time_ms, llm_time_ms, confidence)
+
+**Fichiers créés/modifiés (Niveau 1)** :
+- ✅ `gravis-app/src-tauri/src/rag/direct_chat_commands.rs` (~450 lignes total)
+- ✅ `gravis-app/src-tauri/src/lib.rs` (commande exposée)
+- ✅ `gravis-app/src/lib/llm-synthesis.ts` (nouveau fichier, 207 lignes)
+- ✅ `gravis-app/src/hooks/useDirectChat.ts` (intégré avec limit=7)
+- ✅ `SPRINT1_INTEGRATION_GUIDE.md` (guide complet)
+
+**Architecture choisie** :
+- ✅ Rust backend retourne contexte formaté via `chat_with_llm_context`
+- ✅ Frontend TypeScript appelle LLM via `LiteLLMClient` existant
+- ✅ Réutilise infrastructure LLM déjà configurée (Model Selector)
+
+#### ⚠️ DÉVIATIONS NON PLANIFIÉES - Sprint 1 "Niveau 1.5" (ajouté itérativement)
+
+**❌ PROBLÈME : Sur-complexification du pipeline pour fixer 1 query test**
+
+**Ajouts hors-roadmap** :
+1. **Query-Aware Reranker** (`src-tauri/src/rag/search/query_aware_reranker.rs`, 274 lignes)
+   - ❌ **NON planifié** dans roadmap original
+   - Détection query type hardcodée (Goal/Method/Result/General)
+   - 30+ marqueurs hardcodés ("objectif", "but", "goal", "SAM", "CLIP", etc.)
+   - Pénalités/boosts heuristiques (benchmark noise -0.7, Abstract +0.5, etc.)
+   - **RISQUE** : Sur-spécialisé pour queries "objectif", peut dégrader autres types
+
+2. **Pipeline Reranking + Filtres 3-Pass** (dans `chat_with_llm_context`)
+   - ❌ **NON planifié** — complexité ajoutée pour fix contamination
+   - Phase 1: RAG retrieval (top-20 au lieu de top-10)
+   - Phase 1.5: Query-aware reranking (20 → 10)
+   - Phase 2: Filtre 3-pass (visual contamination, adaptive threshold, lexical overlap)
+   - Phase 3: Top-7 final
+   - **RISQUE** : 4 étapes de filtering, difficile à debugger, comportement imprévisible
+
+3. **Prompt LLM sur-spécialisé** (`llm-synthesis.ts`)
+   - ❌ Prompt original simple devenu trop prescriptif
+   - Section "STRATEGIC VS TECHNICAL" (WHY vs HOW) — heuristique rigide
+   - Instructions spécifiques "if objective query → answer WHY not HOW"
+   - **RISQUE** : Bride le LLM au lieu de le guider, pas générique
+
+**Fichiers supplémentaires créés (hors roadmap)** :
+- ⚠️ `gravis-app/src-tauri/src/rag/search/query_aware_reranker.rs` (274 lignes)
+- ⚠️ Modifications `direct_chat_commands.rs` (+300 lignes de filtres)
+
+#### 🐛 PROBLÈMES IDENTIFIÉS (Audit Utilisateur 22 Nov 2024)
+
+**Citation utilisateur** :
+> "je pense qu'on fait de plus en plus de spécifique et pas assez de générique, on enferme la logique que pour cette question, ça ne marchera pas si on pose une autre question"
+
+**Analyse** :
+
+1. **Sur-spécialisation du Reranker**
+   - ❌ 30+ marqueurs hardcodés optimisés pour query "Quel est l'objectif principal"
+   - ❌ Pénalités agressives ("SAM", "CLIP", "benchmark") peuvent virer chunks pertinents
+   - ❌ Boost massif "Abstract" (+0.5) peut dominer le score original (risque faux positifs)
+   - ❌ Pas de validation sur queries variées
+
+2. **Pipeline Trop Complexe (4 étapes)**
+   - ❌ Impossible de savoir quelle étape cause problème
+   - ❌ Logs insuffisants pour tracer décisions de filtering
+   - ❌ Chaque étape peut introduire biais différent
+
+3. **Prompt LLM Devenu Prescriptif**
+   - ❌ "If question asks objective → answer WHY not HOW" = heuristique rigide
+   - ❌ Risque de brider le LLM sur queries ambiguës
+   - ❌ Pas testé sur queries hors "objectif"
+
+4. **Méthodologie de Test Défaillante**
+   - ❌ Optimisation basée sur **1 seule query** ("objectif principal DeepSeek-OCR")
+   - ❌ Pas de test suite avec 10-15 queries variées
+   - ❌ Pas de métriques quantitatives (recall@7, precision)
+   - ❌ Changements itératifs sans validation systématique
+
+5. **Résultats Toujours Insuffisants**
+   - ❌ Après 3 itérations de "fixes", toujours du bruit (Table 3, benchmarks)
+   - ❌ Score top-1 seulement 69% (devrait être 90%+ si chunks pertinents)
+   - ❌ LLM synthesis latency 20s+ (problème infrastructure LLM?)
+
+#### 🎯 ACTIONS RECOMMANDÉES (Post-Audit)
+
+**PRIORITÉ 1 : RETOUR AUX BASES - Validation A/B**
+- [ ] **Désactiver** query-aware reranker → tester pipeline RAG vanilla
+- [ ] **Désactiver** filtres 3-pass → tester pipeline simple (RAG → top-10 → LLM)
+- [ ] **Simplifier** prompt LLM → retour version originale sans WHY/HOW
+- [ ] Comparer qualité réponses AVEC vs SANS chaque composant
+- [ ] **Objectif** : Identifier quel composant aide vraiment vs. ajoute du bruit
+
+**PRIORITÉ 2 : TEST SUITE SYSTÉMATIQUE**
+- [ ] Créer 10-15 queries variées :
+  - 3 queries "objectif/but" (goal)
+  - 3 queries "méthode/architecture" (how)
+  - 3 queries "résultats/performance" (results)
+  - 3 queries factuelles simples ("What is X?")
+- [ ] Pour chaque query, mesurer :
+  - Recall@7 (chunks pertinents dans top-7)
+  - Qualité réponse LLM (score 1-5)
+  - Présence de contamination (oui/non)
+- [ ] Comparer métriques pipeline simple vs. pipeline complexe
+
+**PRIORITÉ 3 : DÉCISION GO/NO-GO par Composant**
+- [ ] Si reranker **n'améliore pas** recall moyen > +5% → **RETIRER**
+- [ ] Si filtres 3-pass **réduisent** recall (faux négatifs) → **SIMPLIFIER ou RETIRER**
+- [ ] Si prompt prescriptif **dégrade** qualité sur queries variées → **REVENIR version simple**
+
+**PRIORITÉ 4 : Si Nécessaire, Fix Infrastructure**
+- [ ] Investiguer pourquoi LLM synthesis prend 20s+ (Modal latency? Model trop gros?)
+- [ ] Vérifier si le problème vient du RAG (chunks bruits) ou du LLM (mauvaise synthèse)
+- [ ] Possiblement tester avec LLM plus rapide (Mistral 7B local via Ollama?)
+
+**Validation (mise à jour)** :
+- ✅ Compilation Rust réussie
+- ✅ Types TypeScript créés
+- ⚠️ User teste avec **1 seule query** (insuffisant)
+- ❌ Réponses > 80% pertinence subjective (**pas mesuré** sur test suite)
+- ❌ Latency < 3s P95 (actuel: **21s+**, dont 20s LLM)
+- ❌ Sources contiennent **encore du bruit** (Table 3, benchmarks)
+
+**Status** : ✅ Niveau 1 fonctionnel mais ⚠️ **PIPELINE SUR-COMPLEXIFIÉ** — **BESOIN AUDIT/SIMPLIFICATION URGENTE**
+
+**Conclusion Audit** :
+> Le Niveau 1 fonctionne techniquement mais a été pollué par des optimisations prématurées basées sur 1 seule query. Le pipeline est devenu fragile et non générique. **Recommandation : Retour pipeline simple + test suite systématique avant d'ajouter toute optimisation.**
 
 ### Sprint 2 : Niveau 2 (Query Rewriting) - IMPORTANT
 

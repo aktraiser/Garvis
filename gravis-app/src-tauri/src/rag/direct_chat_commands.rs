@@ -96,6 +96,32 @@ pub struct SourceSummary {
     pub span_count: usize,
 }
 
+// === Sprint 1 Niveau 1: LLM Response Generation ===
+
+/// Réponse LLM avec contexte formaté pour synthesis
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmContextResponse {
+    pub session_id: String,
+    pub formatted_context: String,  // Context prêt pour le LLM
+    pub chunks: Vec<LlmChunkInfo>,  // Info sur chaque chunk
+    pub query: String,
+    pub search_time_ms: u64,
+    pub has_ocr_data: bool,
+}
+
+/// Information sur un chunk pour le LLM
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmChunkInfo {
+    pub chunk_id: String,
+    pub source_label: String,       // "Figure OCR - Table 2", "Document Text", etc.
+    pub content: String,             // Contenu tronqué à 800 chars
+    pub score: f32,
+    pub confidence: f64,
+    pub page: Option<u32>,
+    pub figure_id: Option<String>,
+    pub source_type: String,
+}
+
 // === Commandes Tauri Phase 2 ===
 
 /// Traiter un document dragué et créer session temporaire - VERSION CANONIQUE
@@ -257,6 +283,153 @@ pub async fn chat_with_dropped_document(
         search_time_ms: search_time,
         chunks_used: scored_chunks.len(),
         sources_summary,
+    })
+}
+
+/// Sprint 1 Niveau 1: Chat avec contexte formaté pour LLM synthesis
+#[tauri::command]
+pub async fn chat_with_llm_context(
+    request: ChatRequest,
+    state: State<'_, DirectChatState>,
+) -> Result<LlmContextResponse, String> {
+    let start_time = std::time::Instant::now();
+    info!("🤖 LLM Context Chat - session: {}, query: '{}'",
+          request.session_id, request.query);
+
+    // 1. Recherche RAG classique (réutilise le pipeline existant)
+    // Fetch top-20 pour avoir un pool élargi, puis reranking + filtres
+    let scored_chunks = state.manager
+        .search_in_session(
+            &request.session_id,
+            &request.query,
+            request.selection,
+            Some(20),  // Pool de 20 chunks avant reranking (élargi pour mieux capturer objectifs stratégiques)
+        )
+        .await
+        .map_err(|e| format!("Search failed: {}", e))?;
+
+    if scored_chunks.is_empty() {
+        warn!("No relevant chunks found for LLM context");
+        return Ok(LlmContextResponse {
+            session_id: request.session_id,
+            formatted_context: String::new(),
+            chunks: vec![],
+            query: request.query,
+            search_time_ms: start_time.elapsed().as_millis() as u64,
+            has_ocr_data: false,
+        });
+    }
+
+    // ========== MODE SIMPLE vs COMPLEXE ==========
+    // AUDIT 22 NOV 2024: Test A/B pour valider utilité des composants
+    //
+    // MODE SIMPLE (baseline): RAG vanilla → top-10 → LLM
+    // MODE COMPLEXE: RAG → query-aware rerank → filtres 3-pass → top-7 → LLM
+    //
+    // Configuration: Set ENABLE_QUERY_RERANKING=false pour mode SIMPLE
+    const ENABLE_QUERY_RERANKING: bool = false;  // ⚠️ DÉSACTIVÉ pour test baseline
+
+    let mut scored_chunks = if ENABLE_QUERY_RERANKING {
+        // MODE COMPLEXE: Query-aware reranking (Sprint 1 Niveau 1.5)
+        use crate::rag::search::QueryAwareReranker;
+        let reranker = QueryAwareReranker::default();
+
+        let reranked_items: Vec<(ScoredChunk, f32)> = scored_chunks
+            .into_iter()
+            .map(|sc| {
+                let score = sc.score;
+                (sc, score)
+            })
+            .collect();
+
+        let reranked = reranker.rerank(
+            &request.query,
+            reranked_items,
+            |sc: &ScoredChunk| sc.chunk.content.as_str(),
+        );
+
+        let result: Vec<ScoredChunk> = reranked
+            .into_iter()
+            .map(|(sc, new_score)| {
+                let mut sc = sc;
+                sc.score = new_score;
+                sc
+            })
+            .take(10)
+            .collect();
+
+        debug!("🔄 MODE COMPLEXE: Query-aware reranking 20 → 10, top: {:.3}",
+               result.first().map(|sc| sc.score).unwrap_or(0.0));
+        result
+    } else {
+        // MODE SIMPLE: Prendre top-10 directement, pas de reranking
+        let result: Vec<ScoredChunk> = scored_chunks.into_iter().take(10).collect();
+        debug!("✅ MODE SIMPLE: Top-10 direct (no reranking), top: {:.3}",
+               result.first().map(|sc| sc.score).unwrap_or(0.0));
+        result
+    };
+
+    // ========== SECTION PRIOR + CONTAMINATION FILTER ==========
+    // AUDIT 22 NOV: Section prior simple (~50 lignes) remplace filtres 3-pass (~300 lignes)
+    use crate::rag::search::SectionPriorReranker;
+
+    let items: Vec<(ScoredChunk, f32)> = scored_chunks
+        .into_iter()
+        .map(|sc| (sc.clone(), sc.score))
+        .collect();
+
+    let reranked = SectionPriorReranker::rerank_and_filter(
+        items,
+        |sc: &ScoredChunk| sc.chunk.content.as_str(),
+        |sc: &ScoredChunk| {
+            use crate::rag::ChunkSource;
+            match sc.chunk.chunk_source {
+                ChunkSource::FigureCaption => "Figure Caption",
+                ChunkSource::Table => "Table",
+                _ => "Document Text",
+            }
+        },
+    );
+
+    let filtered_chunks: Vec<ScoredChunk> = reranked
+        .into_iter()
+        .map(|(mut sc, new_score)| {
+            sc.score = new_score;
+            sc
+        })
+        .take(10)  // TEST A/B: Temporarily back to top-10 to debug "16x compressor" recall issue
+        .collect();
+
+    debug!("✅ Section Prior: {} chunks (top-10 TEST), top: {:.3}",
+           filtered_chunks.len(), filtered_chunks.first().map(|sc| sc.score).unwrap_or(0.0));
+
+    if filtered_chunks.is_empty() {
+        warn!("All chunks filtered out by section prior");
+        return Ok(LlmContextResponse {
+            session_id: request.session_id,
+            formatted_context: String::new(),
+            chunks: vec![],
+            query: request.query,
+            search_time_ms: start_time.elapsed().as_millis() as u64,
+            has_ocr_data: false,
+        });
+    }
+
+    // 3. Construction du contexte formaté pour le LLM
+    let (formatted_context, chunk_infos, has_ocr) = build_llm_context(&filtered_chunks);
+
+    let search_time = start_time.elapsed().as_millis() as u64;
+
+    info!("✅ Built LLM context from {} chunks in {}ms (OCR: {})",
+          chunk_infos.len(), search_time, has_ocr);
+
+    Ok(LlmContextResponse {
+        session_id: request.session_id,
+        formatted_context,
+        chunks: chunk_infos,
+        query: request.query,
+        search_time_ms: search_time,
+        has_ocr_data: has_ocr,
     })
 }
 
@@ -1603,6 +1776,70 @@ fn create_sources_summary(scored_chunks: &[ScoredChunk]) -> Vec<SourceSummary> {
             }
         })
         .collect()
+}
+
+/// Sprint 1 Niveau 1: Construire contexte formaté pour LLM synthesis
+/// Retourne: (formatted_context, chunk_infos, has_ocr_data)
+fn build_llm_context(scored_chunks: &[ScoredChunk]) -> (String, Vec<LlmChunkInfo>, bool) {
+    use crate::rag::ChunkSource;
+
+    let mut context_parts = Vec::new();
+    let mut chunk_infos = Vec::new();
+    let mut has_ocr_data = false;
+
+    for (i, scored_chunk) in scored_chunks.iter().enumerate() {
+        let chunk = &scored_chunk.chunk;
+
+        // Déterminer le label de source
+        let source_label = match chunk.chunk_source {
+            ChunkSource::FigureCaption => {
+                format!("Figure Caption - {}",
+                    chunk.figure_id.as_deref().unwrap_or("Unknown"))
+            },
+            ChunkSource::FigureRegionText => {
+                has_ocr_data = true;
+                format!("Figure OCR - {}",
+                    chunk.figure_id.as_deref().unwrap_or("Unknown"))
+            },
+            ChunkSource::Table => "Table".to_string(),
+            ChunkSource::BodyText => "Document Text".to_string(),
+            _ => "Content".to_string(),
+        };
+
+        // SIMPLIFICATION 23 Nov: Tronquer à 500 chars au lieu de 800 pour réduire latence LLM
+        let truncated_content: String = chunk.content
+            .chars()
+            .take(500)
+            .collect();
+
+        // Formater pour le contexte LLM
+        let context_block = format!(
+            "### Source {} - {} (Page {}, Confidence: {:.0}%)\n{}\n",
+            i + 1,
+            source_label,
+            chunk.start_line, // TODO: Utiliser page_index réel si disponible
+            chunk.metadata.confidence * 100.0,
+            truncated_content
+        );
+        context_parts.push(context_block);
+
+        // Créer info du chunk
+        chunk_infos.push(LlmChunkInfo {
+            chunk_id: chunk.id.clone(),
+            source_label,
+            content: truncated_content,
+            score: scored_chunk.score,
+            confidence: chunk.metadata.confidence as f64,
+            page: None, // TODO: Extraire vrai page_index
+            figure_id: chunk.figure_id.clone(),
+            source_type: format!("{:?}", chunk.chunk_source),
+        });
+    }
+
+    // Joindre avec séparateurs
+    let formatted_context = context_parts.join("\n---\n\n");
+
+    (formatted_context, chunk_infos, has_ocr_data)
 }
 
 /// Calculer confidence globale d'une session

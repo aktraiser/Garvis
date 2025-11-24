@@ -1,8 +1,10 @@
 // useDirectChat - Hook pour gérer le drag & drop et le chat direct avec documents
 // Centralise toute la logique Direct Chat (PR #4)
+// Sprint 1 Niveau 1: LLM Synthesis intégré
 
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { chatWithLlmSynthesis } from '@/lib/llm-synthesis';
 // Types simplifiés sans composants OCR complexes
 
 interface DirectChatSession {
@@ -22,20 +24,7 @@ interface ProcessDocumentResponse {
   confidence_score: number;
 }
 
-interface ChatResponse {
-  response: string;
-  confidence_score: number;
-  session_id: string;
-  search_time_ms: number;
-  chunks_used: number;
-  sources_summary: Array<{
-    chunk_id: string;
-    content_preview: string;
-    score: number;
-    confidence: number;
-    span_count: number;
-  }>;
-}
+// ChatResponse legacy type removed - now using LLM synthesis
 
 export function useDirectChat() {
   // States
@@ -126,7 +115,7 @@ export function useDirectChat() {
     }
   };
 
-  // Handle direct chat with dropped document
+  // Handle direct chat with dropped document - Sprint 1 Niveau 1: LLM Synthesis
   const chatWithDocument = async (userQuery: string): Promise<{
     success: boolean;
     content: string;
@@ -136,38 +125,45 @@ export function useDirectChat() {
     }
 
     try {
-      const response = await invoke<ChatResponse>('chat_with_dropped_document', {
-        request: {
-          session_id: directChatSession.session_id,
-          query: userQuery,
-          selection: null,
-          limit: null,
-        }
-      });
+      console.log('🤖 Using LLM Synthesis for query:', userQuery);
 
-      // Plus de spans highlighting - système simplifié
+      // Sprint 1 Niveau 1: Appel LLM synthesis au lieu de chunks bruts
+      // TEST A/B: Temporarily back to top-10 to debug "16x compressor" recall issue
+      const llmResponse = await chatWithLlmSynthesis(
+        directChatSession.session_id,
+        userQuery,
+        null,  // selection
+        10     // TEST: back to 10 chunks to check recall
+      );
 
-      // Format response with sources
-      let responseContent = response.response;
-      if (response.sources_summary && response.sources_summary.length > 0) {
+      // Formater la réponse avec sources
+      let responseContent = llmResponse.answer;
+
+      // Ajouter les sources si disponibles
+      if (llmResponse.sources && llmResponse.sources.length > 0) {
         responseContent += "\n\n**📚 Sources :**\n";
-        response.sources_summary.forEach((source, idx) => {
+        llmResponse.sources.slice(0, 5).forEach((source, idx) => {
           const score = Math.round(source.score * 100);
           const confidence = Math.round(source.confidence * 100);
-          responseContent += `\n${idx + 1}. **[${score}%]** ${source.content_preview.substring(0, 100)}... *(confiance: ${confidence}%, ${source.span_count} spans)*`;
+          responseContent += `\n${idx + 1}. **[${score}%]** [${source.source_label}] ${source.content.substring(0, 80)}... *(confiance: ${confidence}%)*`;
         });
-        responseContent += `\n\n*Confiance: ${Math.round(response.confidence_score * 100)}% • Recherche: ${response.search_time_ms}ms*`;
       }
+
+      // Ajouter métriques
+      const totalTime = llmResponse.search_time_ms + llmResponse.llm_time_ms;
+      responseContent += `\n\n*Confiance: ${Math.round(llmResponse.confidence * 100)}% • RAG: ${llmResponse.search_time_ms}ms • LLM: ${llmResponse.llm_time_ms}ms • Total: ${totalTime}ms*`;
+
+      console.log(`✅ LLM synthesis complete: ${totalTime}ms total`);
 
       return {
         success: true,
         content: responseContent
       };
     } catch (error) {
-      console.error('Erreur chat direct:', error);
+      console.error('❌ Erreur LLM synthesis:', error);
       return {
         success: false,
-        content: `❌ Erreur: ${error}`
+        content: `❌ Erreur LLM: ${error}`
       };
     }
   };

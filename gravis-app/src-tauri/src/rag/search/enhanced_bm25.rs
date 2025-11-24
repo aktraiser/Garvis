@@ -4,13 +4,9 @@
 use std::collections::HashMap;
 use tracing::debug;
 
-/// Termes techniques à préserver intacts (sans split)
-const TECHNICAL_TERMS: &[&str] = &[
-    "deepencoder", "deepseek", "internvl", "onechart",
-    "convolutionnel", "compresseur", "encoder", "decoder",
-    "transformer", "attention", "16x", "32x", "64x",
-    "baseline", "sota", "benchmark", "architecture",
-];
+// SIMPLIFICATION 23 Nov V2: TECHNICAL_TERMS complètement supprimé
+// IDF dynamique détecte automatiquement TOUS les termes rares
+// Aucun hardcoding = 100% générique
 
 /// Enhanced BM25 Encoder avec support n-grams
 #[derive(Clone)]
@@ -68,19 +64,13 @@ impl EnhancedBM25Encoder {
                self.num_docs, self.avg_doc_length);
     }
 
-    /// Tokenization améliorée avec n-grams et préservation termes techniques
+    /// Tokenization améliorée avec n-grams - 100% générique
+    /// SIMPLIFICATION 23 Nov V2: TECHNICAL_TERMS supprimé, IDF détecte automatiquement termes rares
     fn enhanced_tokenize(&self, text: &str) -> Vec<String> {
         let mut tokens = Vec::new();
         let text_lower = text.to_lowercase();
 
-        // 1. Détecter et préserver termes techniques intacts
-        for &tech_term in TECHNICAL_TERMS {
-            if text_lower.contains(tech_term) {
-                tokens.push(tech_term.to_string());
-            }
-        }
-
-        // 2. Tokenisation standard par mots
+        // 1. Tokenisation standard par mots
         let standard_tokens: Vec<String> = text_lower
             .split_whitespace()
             .map(|s| self.normalize_token(s))
@@ -89,63 +79,13 @@ impl EnhancedBM25Encoder {
 
         tokens.extend(standard_tokens.clone());
 
-        // 3. Génération de bigrams pour termes composés
+        // 2. Génération de bigrams pour termes composés
         for window in standard_tokens.windows(2) {
             let bigram = format!("{}_{}", window[0], window[1]);
             tokens.push(bigram);
         }
 
-        // 4. Générer variantes pour termes comme "DeepEncoder"
-        for token in &standard_tokens {
-            if let Some(variants) = self.generate_variants(token) {
-                tokens.extend(variants);
-            }
-        }
-
         tokens
-    }
-
-    /// Générer variantes orthographiques pour termes composés
-    fn generate_variants(&self, token: &str) -> Option<Vec<String>> {
-        let mut variants = Vec::new();
-
-        // Skip si le token contient des caractères non-ASCII (chinois, etc.)
-        if !token.is_ascii() {
-            return None;
-        }
-
-        // Patterns CamelCase détectés (ex: "deepencoder" → "deep_encoder")
-        if token.len() > 6 {
-            // Essayer de split en 2 parties égales - Safe avec chars()
-            let char_count = token.chars().count();
-            let mid = char_count / 2;
-            if mid > 2 {
-                let part1: String = token.chars().take(mid).collect();
-                let part2: String = token.chars().skip(mid).collect();
-                variants.push(format!("{}_{}", part1, part2));
-            }
-
-            // Patterns connus
-            if token.contains("encoder") {
-                let prefix = token.replace("encoder", "");
-                if !prefix.is_empty() {
-                    variants.push(format!("{}_encoder", prefix));
-                }
-            }
-
-            if token.contains("decoder") {
-                let prefix = token.replace("decoder", "");
-                if !prefix.is_empty() {
-                    variants.push(format!("{}_decoder", prefix));
-                }
-            }
-        }
-
-        if variants.is_empty() {
-            None
-        } else {
-            Some(variants)
-        }
     }
 
     /// Normaliser un token
@@ -206,77 +146,57 @@ impl EnhancedBM25Encoder {
             .count()
     }
 
-    /// Calculer keyword boost pour un terme technique exact
+    /// Calculer keyword boost basé sur co-occurrence query-content (100% générique)
+    /// SIMPLIFICATION 23 Nov V2: Plus de TECHNICAL_TERMS hardcodés
+    /// Boost proportionnel au nombre de termes rares (bas IDF) partagés entre query et content
     pub fn keyword_boost(&self, query: &str, content: &str) -> f32 {
-        let query_lower = query.to_lowercase();
+        let query_tokens = self.enhanced_tokenize(query);
         let content_lower = content.to_lowercase();
+
         let mut boost: f32 = 0.0;
+        let mut rare_term_matches = 0;
 
-        // Extraire termes techniques de la requête
-        for &tech_term in TECHNICAL_TERMS {
-            if query_lower.contains(tech_term) {
-                // Match exact
-                if content_lower.contains(tech_term) {
-                    let base_boost = match tech_term {
-                        "deepencoder" | "deepseek" | "internvl" => 0.5, // Boost fort pour noms de modèles
-                        "16x" | "32x" | "64x" => 0.3,                   // Boost pour ratios spécifiques
-                        _ => 0.2,                                        // Boost standard
-                    };
+        // Pour chaque terme de la query, vérifier s'il est rare (bas doc_freq) ET présent dans content
+        for token in query_tokens.iter() {
+            // Ignorer tokens très courts (stop words implicites)
+            if token.len() < 3 {
+                continue;
+            }
 
-                    // Boost additionnel si le chunk contient des mots explicatifs
-                    let has_explanation = self.has_explanatory_context(&content_lower, tech_term);
-                    let explanation_bonus = if has_explanation { 0.2 } else { 0.0 };
+            // Vérifier si le token est présent dans le contenu
+            if content_lower.contains(token.as_str()) {
+                // Calculer rareté du terme via IDF
+                let doc_freq = self.document_frequency(token);
+                let idf = if doc_freq > 0 && self.num_docs > 0 {
+                    ((self.num_docs as f32 - doc_freq as f32 + 0.5) / (doc_freq as f32 + 0.5) + 1.0).ln()
+                } else {
+                    0.0
+                };
 
-                    boost += base_boost + explanation_bonus;
-                }
+                // Boost proportionnel à la rareté du terme (IDF normalisé)
+                // IDF typique: 0-5, on normalise à 0-0.2 par terme
+                let normalized_idf_boost = (idf / 5.0).min(0.2);
+                boost += normalized_idf_boost;
 
-                // Variantes avec tirets/espaces
-                let variants = vec![
-                    tech_term.replace("_", " "),
-                    tech_term.replace("_", "-"),
-                ];
-
-                for variant in variants {
-                    if content_lower.contains(&variant) {
-                        boost += 0.3; // Boost pour variantes
-                    }
+                // Compter les termes rares (IDF > 2.0 = apparaît dans <15% des docs)
+                if idf > 2.0 {
+                    rare_term_matches += 1;
                 }
             }
+        }
+
+        // Bonus si plusieurs termes rares matchent (signe de haute pertinence)
+        if rare_term_matches >= 2 {
+            boost += 0.2;
         }
 
         // Cap à 1.0
         boost.min(1.0_f32)
     }
 
-    /// Détecte si un chunk contient un contexte explicatif autour d'un terme technique
-    fn has_explanatory_context(&self, content: &str, tech_term: &str) -> bool {
-        // Mots clés qui indiquent une explication
-        let explanation_keywords = [
-            "permet", "fonction", "role", "rôle", "but", "objectif",
-            "utilise", "used", "allows", "enables", "purpose",
-            "pour", "for", "afin", "to", "in order",
-            "réduire", "reduce", "compress", "compresse",
-            "transformer", "transform", "convert", "convertir",
-            // Ajout pour données chiffrées et résultats expérimentaux
-            "achieve", "atteint", "précision", "accuracy", "precision",
-            "résultat", "result", "performance", "measure", "mesure",
-            "expérience", "experiment", "evaluation", "évaluation",
-            "ratio", "taux", "rate", "level", "niveau",
-        ];
-
-        // Chercher si le terme technique apparaît près de mots explicatifs
-        if let Some(term_pos) = content.find(tech_term) {
-            // Extraire contexte autour du terme (±200 chars)
-            let start = term_pos.saturating_sub(200);
-            let end = (term_pos + tech_term.len() + 200).min(content.len());
-            let context = &content[start..end];
-
-            // Vérifier présence de mots explicatifs dans le contexte
-            explanation_keywords.iter().any(|&keyword| context.contains(keyword))
-        } else {
-            false
-        }
-    }
+    // SIMPLIFICATION 23 Nov: has_explanatory_context() supprimée
+    // Raison: Heuristiques linguistiques fragiles et langue-dépendantes
+    // Le LLM est bien meilleur pour détecter le contexte explicatif
 
     /// Détecte si un chunk fait référence à une figure ou tableau avec données
     pub fn has_figure_reference(&self, content: &str) -> bool {
@@ -318,62 +238,65 @@ mod tests {
     fn test_enhanced_tokenization() {
         let encoder = EnhancedBM25Encoder::new();
 
-        let text = "DeepEncoder uses convolutionnel 16x compression";
+        let text = "The model uses convolutional compression with high ratio";
         let tokens = encoder.enhanced_tokenize(text);
 
-        // Vérifier présence des tokens clés
-        assert!(tokens.contains(&"deepencoder".to_string()));
-        assert!(tokens.contains(&"convolutionnel".to_string()));
-        assert!(tokens.contains(&"16x".to_string()));
+        // Vérifier présence des tokens individuels
+        assert!(tokens.contains(&"model".to_string()));
+        assert!(tokens.contains(&"convolutional".to_string()));
+        assert!(tokens.contains(&"compression".to_string()));
 
-        // Vérifier bigrams
+        // Vérifier génération de bigrams
         assert!(tokens.iter().any(|t| t.contains("_")));
+        assert!(tokens.contains(&"model_uses".to_string()));
     }
 
     #[test]
     fn test_keyword_boost() {
-        let encoder = EnhancedBM25Encoder::new();
+        let mut encoder = EnhancedBM25Encoder::new();
 
-        let query = "DeepEncoder 16x compression";
-        let content_relevant = "The DeepEncoder uses a 16x convolutional compressor";
-        let content_irrelevant = "Some other content about transformers";
+        // Indexer des documents pour calculer IDF
+        let docs = vec![
+            ("doc1".to_string(), "neural network architecture compression".to_string()),
+            ("doc2".to_string(), "deep learning model training".to_string()),
+            ("doc3".to_string(), "transformer attention mechanism".to_string()),
+            ("doc4".to_string(), "convolutional neural networks".to_string()),
+            ("doc5".to_string(), "machine learning algorithms".to_string()),
+        ];
+        encoder.index_documents(&docs);
+
+        let query = "neural compression architecture";
+        let content_relevant = "The neural network uses advanced compression in its architecture";
+        let content_irrelevant = "Some other content about general topics";
 
         let boost_relevant = encoder.keyword_boost(query, content_relevant);
         let boost_irrelevant = encoder.keyword_boost(query, content_irrelevant);
 
-        assert!(boost_relevant > 0.5);
-        assert!(boost_irrelevant < 0.1);
+        // Le contenu pertinent devrait avoir un boost plus élevé grâce aux termes rares partagés
+        assert!(boost_relevant > boost_irrelevant);
     }
 
-    #[test]
-    fn test_variants_generation() {
-        let encoder = EnhancedBM25Encoder::new();
-
-        let variants = encoder.generate_variants("deepencoder");
-        assert!(variants.is_some());
-
-        let variants_vec = variants.unwrap();
-        assert!(variants_vec.iter().any(|v| v.contains("encoder")));
-    }
+    // SIMPLIFICATION 23 Nov: test_variants_generation supprimé
+    // generate_variants() a été supprimée
 
     #[test]
     fn test_bm25_scoring() {
         let mut encoder = EnhancedBM25Encoder::new();
 
         let docs = vec![
-            ("doc1".to_string(), "DeepEncoder uses convolutional compression 16x".to_string()),
-            ("doc2".to_string(), "InternVL2 uses parallel computation method".to_string()),
-            ("doc3".to_string(), "Another document about transformers and attention".to_string()),
+            ("doc1".to_string(), "neural network uses convolutional compression architecture".to_string()),
+            ("doc2".to_string(), "vision model uses parallel computation method".to_string()),
+            ("doc3".to_string(), "another document about transformers and attention".to_string()),
         ];
 
         encoder.index_documents(&docs);
 
-        let query = "DeepEncoder 16x compression";
+        let query = "neural compression architecture";
 
         let score1 = encoder.score(query, "doc1");
         let score2 = encoder.score(query, "doc2");
 
-        // doc1 devrait scorer plus haut car contient les termes exacts
+        // doc1 devrait scorer plus haut car contient les termes de la requête
         assert!(score1 > score2);
     }
 }

@@ -191,6 +191,8 @@ impl ScoringEngine {
     }
 
     /// Calculer le score hybride normalisé avec poids adaptatifs
+    /// SIMPLIFICATION 23 Nov: Passer en baseline FIXE 0.4/0.4/0.2
+    /// Intent detection conservée pour logs mais poids ignorés jusqu'à preuve A/B
     pub fn compute_hybrid_scores(
         &self,
         dense_scores: &[f32],
@@ -214,18 +216,24 @@ impl ScoringEngine {
                keyword_norm.iter().cloned().fold(f32::INFINITY, f32::min),
                keyword_norm.iter().cloned().fold(f32::NEG_INFINITY, f32::max));
 
-        // 2. Obtenir les poids selon l'intent
-        let weights = IntentWeights::for_intent(query_intent);
+        // 2. BASELINE FIXE: Poids 0.4/0.4/0.2 pour TOUTES les queries
+        // Intent detection gardée pour logs mais NON utilisée pour scoring
+        const FIXED_WEIGHTS: IntentWeights = IntentWeights {
+            dense: 0.4,
+            sparse: 0.4,
+            keyword: 0.2,
+        };
 
-        debug!("⚖️  Intent weights: dense={:.1}, sparse={:.1}, keyword={:.1}",
-               weights.dense, weights.sparse, weights.keyword);
+        debug!("⚖️  Intent detected: {:?} (IGNORED - using fixed weights 0.4/0.4/0.2)", query_intent);
+        debug!("⚖️  Fixed weights: dense={:.1}, sparse={:.1}, keyword={:.1}",
+               FIXED_WEIGHTS.dense, FIXED_WEIGHTS.sparse, FIXED_WEIGHTS.keyword);
 
-        // 3. Calculer scores hybrides
+        // 3. Calculer scores hybrides avec poids FIXES
         dense_norm.iter()
             .zip(sparse_norm.iter())
             .zip(keyword_norm.iter())
             .map(|((d, s), k)| {
-                weights.dense * d + weights.sparse * s + weights.keyword * k
+                FIXED_WEIGHTS.dense * d + FIXED_WEIGHTS.sparse * s + FIXED_WEIGHTS.keyword * k
             })
             .collect()
     }

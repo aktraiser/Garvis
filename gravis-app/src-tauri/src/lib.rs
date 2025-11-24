@@ -26,7 +26,7 @@ use rag::commands::{
     add_document_intelligent, search_with_metadata, get_document_metadata, list_rag_documents, delete_rag_document, query_rag_with_context
 };
 use rag::direct_chat_commands::{
-    process_dropped_document, chat_with_dropped_document, get_direct_chat_session,
+    process_dropped_document, chat_with_dropped_document, chat_with_llm_context, get_direct_chat_session,
     cleanup_direct_chat_session, get_direct_chat_stats, list_direct_chat_sessions, cleanup_expired_sessions,
     get_temp_pdf_url, get_pdf_for_session
 };
@@ -722,6 +722,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             // Phase 2: Chat Direct Commands
             process_dropped_document,
             chat_with_dropped_document,
+            chat_with_llm_context,  // Sprint 1 Niveau 1: LLM Synthesis
             get_direct_chat_session,
             cleanup_direct_chat_session,
             get_direct_chat_stats,
